@@ -1,0 +1,41 @@
+# Binaries
+bin/
+*.exe
+*.out
+
+# Build artifacts
+dist/
+
+# Go module cache
+vendor/
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data directories created during runtime
+data/
+tmp/
+scratch/
+
+# Developer progress and internal notes (not for end users)
+PROGRESS.md
+summary.md
+
+# Test coverage
+coverage.out
+coverage.html
+*.prof
+
+# Log files
+*.log

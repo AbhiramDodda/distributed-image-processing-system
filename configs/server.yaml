@@ -1,0 +1,32 @@
+storage:
+  endpoint: "http://localhost:9000"
+  region: "us-east-1"
+  bucket: "petabyte-images"
+  access_key_id: "minioadmin"
+  secret_access_key: "minioadmin"
+  use_path_style: true
+  multipart_threshold: 104857600   # 100 MB
+  multipart_chunk_size: 67108864   # 64 MB
+  multipart_concurrency: 8
+
+metadata:
+  db_path: "./metadata.db"
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  metadata_db_path: "./metadata.db"
+
+ingestion:
+  workers: 16
+  batch_size: 100
+  max_file_size_mb: 500
+
+tiering:
+  hot_days_threshold: 30
+  warm_days_threshold: 90
+  cold_days_threshold: 365
+
+logging:
+  level: info
+  format: text
