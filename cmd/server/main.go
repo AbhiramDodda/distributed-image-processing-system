@@ -156,6 +156,19 @@ func registerRoutes(mux *http.ServeMux, idx *metadata.Index, store *storage.Clie
 		writeJSON(w, http.StatusOK, records)
 	})
 
+	mux.HandleFunc("/v1/labels", func(w http.ResponseWriter, r *http.Request) {
+		dataset := r.URL.Query().Get("dataset")
+		if dataset == "" {
+			dataset = "train"
+		}
+		counts, err := idx.LabelCounts(r.Context(), dataset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, counts)
+	})
+
 	mux.HandleFunc("/v1/tiering/estimate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "POST required")

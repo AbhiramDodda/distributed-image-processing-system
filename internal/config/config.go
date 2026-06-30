@@ -13,6 +13,7 @@ type Config struct {
 	Metadata MetadataConfig `yaml:"metadata"`
 	Coordinator CoordinatorConfig `yaml:"coordinator"`
 	Worker WorkerConfig `yaml:"worker"`
+	Operator OperatorConfig `yaml:"operator"`
 	Server ServerConfig `yaml:"server"`
 	Ingestion IngestionConfig `yaml:"ingestion"`
 	Tiering TieringConfig `yaml:"tiering"`
@@ -81,6 +82,16 @@ type MetricsConfig struct {
 	Path string `yaml:"path"`
 }
 
+type OperatorConfig struct {
+	Namespace string `yaml:"namespace"`
+	WorkerImage string `yaml:"worker_image"`
+	CoordinatorURL string `yaml:"coordinator_url"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+	MaxJobsPerCycle int `yaml:"max_jobs_per_cycle"`
+	RayDashboardURL string `yaml:"ray_dashboard_url"`
+	KubeconfigPath string `yaml:"kubeconfig_path"`
+}
+
 type LoggingConfig struct {
 	Level string `yaml:"level"`
 	Format string `yaml:"format"`
@@ -139,6 +150,13 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Port:    9090,
 			Path:    "/metrics",
+		},
+		Operator: OperatorConfig{
+			Namespace:       "petabyte",
+			WorkerImage:     "petabyte-worker:latest",
+			CoordinatorURL:  "http://coordinator:8090",
+			PollInterval:    5 * time.Second,
+			MaxJobsPerCycle: 10,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

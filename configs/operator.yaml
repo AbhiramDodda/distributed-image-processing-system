@@ -1,0 +1,19 @@
+operator:
+  namespace: petabyte
+  worker_image: petabyte-worker:latest
+  coordinator_url: http://coordinator:8090
+  poll_interval: 5s
+  max_jobs_per_cycle: 10
+  ray_dashboard_url: http://ray-dashboard:8265
+
+storage:
+  endpoint: http://minio:9000
+  region: us-east-1
+  bucket: petabyte-images
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+  use_path_style: true
+
+logging:
+  level: info
+  format: json

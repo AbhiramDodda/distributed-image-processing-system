@@ -168,7 +168,42 @@ func (idx *Index) DatasetStats(ctx context.Context, dataset string) (*DatasetSta
 		}
 		s.TierBreakdown[storage.StorageTier(tier)] = cnt
 	}
+
+	counts, err := idx.LabelCounts(ctx, dataset)
+	if err != nil {
+		return nil, err
+	}
+	s.LabelCount = counts
 	return s, nil
+}
+
+// LabelCounts returns the frequency of each label across a dataset.
+// Labels are stored as a JSON array per record, so aggregation happens in Go.
+// This is an O(n) scan — acceptable for a stats endpoint, but a production
+// system would maintain an inverted label->count index instead.
+func (idx *Index) LabelCounts(ctx context.Context, dataset string) (map[string]int64, error) {
+	rows, err := idx.db.QueryContext(ctx,
+		`SELECT labels FROM records WHERE dataset = ?`, dataset)
+	if err != nil {
+		return nil, fmt.Errorf("label counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var labelsJSON string
+		if err := rows.Scan(&labelsJSON); err != nil {
+			return nil, err
+		}
+		var labels []string
+		if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
+			continue
+		}
+		for _, l := range labels {
+			counts[l]++
+		}
+	}
+	return counts, rows.Err()
 }
 
 // UpdateTier changes the storage tier of a record in the index.

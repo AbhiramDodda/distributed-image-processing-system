@@ -211,6 +211,50 @@ func (s *Scheduler) GetJob(id string) (*Job, error) {
 	return j, nil
 }
 
+// PendingCount returns the number of tasks waiting to be dispatched.
+// Used by the operator to determine how many K8s Jobs to create, and
+// exposed as a Prometheus metric for the HPA custom metric adapter.
+func (s *Scheduler) PendingCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.pendingQ)
+}
+
+// DrainPending removes and returns up to n pending task assignments.
+// The operator calls this to get tasks it should create K8s Jobs for.
+func (s *Scheduler) DrainPending(n int) []TaskAssignment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n > len(s.pendingQ) {
+		n = len(s.pendingQ)
+	}
+	ids := s.pendingQ[:n]
+	s.pendingQ = s.pendingQ[n:]
+	var assignments []TaskAssignment
+	for _, tid := range ids {
+		t, ok := s.tasks[tid]
+		if !ok || t.Status != TaskPending {
+			continue
+		}
+		j, ok := s.jobs[t.JobID]
+		if !ok {
+			continue
+		}
+		now := time.Now()
+		t.Status = TaskAssigned
+		t.AssignedAt = &now
+		assignments = append(assignments, TaskAssignment{
+			TaskID:    t.ID,
+			JobID:     t.JobID,
+			Shard:     t.Shard,
+			Dataset:   j.Dataset,
+			Algorithm: j.Algorithm,
+			Config:    j.Config,
+		})
+	}
+	return assignments
+}
+
 func (s *Scheduler) ListJobs() []*Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

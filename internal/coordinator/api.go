@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/abhiramd/petabyte-platform/internal/cluster"
@@ -18,6 +19,8 @@ func NewAPI(coord *Coordinator) *API { return &API{coord: coord} }
 
 func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", a.handleHealth)
+	mux.HandleFunc("/v1/metrics/pending", a.handlePendingMetric)
+	mux.HandleFunc("/v1/operator/drain", a.handleOperatorDrain)
 	mux.HandleFunc("/v1/cluster/register", a.handleRegister)
 	mux.HandleFunc("/v1/cluster/heartbeat", a.handleHeartbeat)
 	mux.HandleFunc("/v1/cluster/nodes", a.handleNodes)
@@ -30,6 +33,38 @@ func (a *API) Register(mux *http.ServeMux) {
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *API) handlePendingMetric(w http.ResponseWriter, r *http.Request) {
+	pending := a.coord.sched.PendingCount()
+	active := len(a.coord.membership.ActiveNodes())
+	var ratio float64
+	if active > 0 {
+		ratio = float64(pending) / float64(active)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pending_tasks":            pending,
+		"active_workers":           active,
+		"pending_tasks_per_worker": ratio,
+	})
+}
+
+func (a *API) handleOperatorDrain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	n := 10
+	if s := r.URL.Query().Get("n"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			n = v
+		}
+	}
+	assignments := a.coord.sched.DrainPending(n)
+	if assignments == nil {
+		assignments = []scheduler.TaskAssignment{}
+	}
+	writeJSON(w, http.StatusOK, assignments)
 }
 
 func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {

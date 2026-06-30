@@ -1,0 +1,71 @@
+# KubeRay RayCluster CR — requires the KubeRay operator installed.
+# Install: helm install kuberay-operator kuberay/kuberay-operator
+apiVersion: ray.io/v1alpha1
+kind: RayCluster
+metadata:
+  name: petabyte-ray
+  namespace: petabyte
+spec:
+  rayVersion: "2.9.0"
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-cpus: "0"
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.9.0-gpu
+            ports:
+              - containerPort: 6379
+                name: gcs
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 10001
+                name: client
+            resources:
+              requests:
+                cpu: "2"
+                memory: "8Gi"
+              limits:
+                cpu: "4"
+                memory: "16Gi"
+  workerGroupSpecs:
+    - replicas: 4
+      minReplicas: 2
+      maxReplicas: 16
+      groupName: gpu-workers
+      rayStartParams: {}
+      template:
+        spec:
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.9.0-gpu
+              resources:
+                requests:
+                  cpu: "8"
+                  memory: "32Gi"
+                  nvidia.com/gpu: "1"
+                limits:
+                  cpu: "16"
+                  memory: "64Gi"
+                  nvidia.com/gpu: "1"
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+---
+# Service to expose the Ray Dashboard for the operator's health check.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-dashboard
+  namespace: petabyte
+spec:
+  selector:
+    ray.io/node-type: head
+    ray.io/cluster: petabyte-ray
+  ports:
+    - name: dashboard
+      port: 8265
+      targetPort: 8265

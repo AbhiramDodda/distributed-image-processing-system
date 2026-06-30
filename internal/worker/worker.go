@@ -164,6 +164,29 @@ func (w *Worker) executeTask(ctx context.Context, a scheduler.TaskAssignment) {
 	}
 }
 
+// RunTask executes a single TaskAssignment and reports the result to the
+// coordinator. Used by K8s Job pods that receive their assignment via env var.
+func (w *Worker) RunTask(ctx context.Context, a scheduler.TaskAssignment) error {
+	w.log.Info("single-task mode", "task_id", a.TaskID, "shard", a.Shard, "dataset", a.Dataset)
+	postJSON(w.coordinator+"/v1/tasks/"+a.TaskID+"/start", scheduler.StartTaskRequest{WorkerID: w.id})
+	start := time.Now()
+	processed, bytesRead, outputKey, execErr := w.runAlgorithm(ctx, a)
+	req := scheduler.ResultRequest{
+		WorkerID:        w.id,
+		ImagesProcessed: processed,
+		BytesRead:       bytesRead,
+		OutputKey:       outputKey,
+		Duration:        time.Since(start),
+	}
+	if execErr != nil {
+		req.Error = execErr.Error()
+		w.log.Error("task failed", "task_id", a.TaskID, "err", execErr)
+	} else {
+		w.log.Info("task done", "task_id", a.TaskID, "images", processed, "bytes", bytesRead)
+	}
+	return postJSON(w.coordinator+"/v1/tasks/"+a.TaskID+"/result", req)
+}
+
 // runAlgorithm is the Level 2 placeholder. Level 4 replaces this with
 // sandboxed container execution via gVisor.
 func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (int64, int64, string, error) {

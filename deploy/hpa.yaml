@@ -1,0 +1,68 @@
+# RBAC so the operator can create/delete Jobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: petabyte-operator
+  namespace: petabyte
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: petabyte-operator
+  namespace: petabyte
+subjects:
+  - kind: ServiceAccount
+    name: petabyte-coordinator
+    namespace: petabyte
+roleRef:
+  kind: Role
+  name: petabyte-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+# Prometheus Adapter ConfigMap — routes pending_tasks_per_worker from
+# Prometheus to the Custom Metrics API so the HPA can read it.
+# Requires prometheus-adapter deployed in monitoring namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    rules:
+      - seriesQuery: 'pending_tasks_per_worker{namespace="petabyte"}'
+        resources:
+          overrides:
+            namespace:
+              resource: namespace
+        name:
+          matches: "pending_tasks_per_worker"
+          as: "pending_tasks_per_worker"
+        metricsQuery: 'avg(pending_tasks_per_worker{namespace="petabyte"})'
+---
+# HPA scales the worker DaemonSet's node pool indirectly via Cluster Autoscaler.
+# The metric target of 5 means: add nodes when each worker has >5 pending tasks.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: coordinator-hpa
+  namespace: petabyte
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: coordinator
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: pending_tasks_per_worker
+        target:
+          type: AverageValue
+          averageValue: "5"

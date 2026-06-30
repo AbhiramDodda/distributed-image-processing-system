@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: petabyte
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: petabyte-coordinator
+  namespace: petabyte
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: petabyte
+  labels:
+    app: petabyte-coordinator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petabyte-coordinator
+  template:
+    metadata:
+      labels:
+        app: petabyte-coordinator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: petabyte-coordinator
+      containers:
+        - name: coordinator
+          image: petabyte-coordinator:latest
+          args: ["-config", "/config/coordinator.yaml"]
+          ports:
+            - name: api
+              containerPort: 8090
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      volumes:
+        - name: config
+          configMap:
+            name: petabyte-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: petabyte
+  labels:
+    app: petabyte-coordinator
+spec:
+  selector:
+    app: petabyte-coordinator
+  ports:
+    - name: api
+      port: 8090
+      targetPort: 8090
+    - name: metrics
+      port: 9090
+      targetPort: 9090
