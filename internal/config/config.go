@@ -62,6 +62,7 @@ type ServerConfig struct {
 	Host string `yaml:"host"`
 	Port int `yaml:"port"`
 	MetadataDBPath string `yaml:"metadata_db_path"`
+	RegistryDBPath string `yaml:"registry_db_path"`
 }
 
 type IngestionConfig struct {
@@ -135,6 +136,7 @@ func DefaultConfig() *Config {
 			Host:           "0.0.0.0",
 			Port:           8080,
 			MetadataDBPath: "./metadata.db",
+			RegistryDBPath: "./registry.db",
 		},
 		Ingestion: IngestionConfig{
 			Workers:       16,

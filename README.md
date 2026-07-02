@@ -64,6 +64,15 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - HPA: `pending_tasks_per_worker` custom metric exposed at `/v1/metrics/pending`, bridged to K8s Custom Metrics API via the Prometheus Adapter
 - DaemonSet workers: one pod per node ensures data locality; `CachedShards` in the heartbeat lets the operator know what each node holds
 
+### Level 4 - Sandboxed Algorithm Execution (complete)
+
+- Untrusted user code runs in a gVisor (`runsc`) container with **network mode `none`** — it can read the mounted input volume and write the output volume, nothing else. The sandbox cannot be disabled by the user's manifest.
+- Algorithm package format: a zip containing `Dockerfile`, `main.py`, `requirements.txt`, and `manifest.json` (declares name, version, base image, GPU/memory/timeout, and parallelism mode).
+- Registry validates every submission against a per-tenant quota and a base-image allowlist before recording it. `(name, version)` is immutable — a running job's code can never change under it.
+- Content-canonical package digest (hashes sorted file contents, not the zip bytes) so identical code dedupes to one image regardless of how the zip was packed; the digest doubles as the image tag.
+- Hard resource limits (`--cpus`, `--memory`, `--gpus`) enforced by the runtime/cgroups; timeout and OOM kills are distinguished so the scheduler can retry vs. fail appropriately.
+- `sandbox-runner` sidecar: a single-shot binary that stages a shard into the input volume, runs the algorithm image, collects `result.json`, uploads declared artifacts, and reports back to the coordinator.
+
 ## Prerequisites
 
 - Go 1.22 or later
@@ -93,6 +102,7 @@ go build -o bin/worker      ./cmd/worker
 go build -o bin/server      ./cmd/server
 go build -o bin/ingest      ./cmd/ingest
 go build -o bin/operator    ./cmd/operator
+go build -o bin/sandbox-runner ./cmd/sandbox-runner
 ```
 
 ## Testing
@@ -103,12 +113,13 @@ Run the full test suite (no external services required):
 go test ./...
 ```
 
-The suite covers 93 tests across 10 packages and completes in under one second. No Docker or MinIO is needed because:
+The suite covers 117 tests across 13 packages and completes in a few seconds. No Docker or MinIO is needed because:
 
 - Storage tests exercise sharding logic, tier mapping, and the multipart chunk reader (pure functions, no I/O)
-- Metadata tests use a real SQLite database in a temp directory
+- Metadata and registry tests use a real SQLite database in a temp directory
 - Coordinator integration tests spin up the full coordinator API in-process via `net/http/httptest`
 - K8s watcher and Ray client tests run against fake API servers via `net/http/httptest`
+- Sandbox tests inject an in-memory object store and a fake container runtime, so the full task flow (stage → run → collect → upload) runs with no Docker
 - Scheduler, ring, and membership tests exercise the state machines with real timers and short timeouts
 
 Because the platform's correctness depends on concurrent access to shared state, run the suite under the race detector before any change to the scheduler, ring, or membership packages:
@@ -141,6 +152,8 @@ go test ./internal/cluster/... -v
 | `internal/config` | 5 | DefaultConfig sane values, Load with missing file, overrides, malformed YAML |
 | `internal/metrics` | 6 | Counter/Gauge/Histogram math, concurrent counter increments under -race, collector snapshot |
 | `internal/tiering` | 5 | CostProjection zero/single/ordering/petabyte-scale/linear scaling |
+| `internal/sandbox` | 17 | Package parse (required files, bad/invalid manifest, traversal, zip-bomb, content-canonical digest), buildRunArgs isolation flags (runsc + network none + ro mount), LimitsFromManifest, result collection + artifact-traversal guard, end-to-end Runner via fakes |
+| `internal/registry` | 7 | Register/Get round-trip, version immutability, List/ListVersions, quota breaches, base-image allowlist |
 
 ### What requires Docker (not automated yet)
 
@@ -288,6 +301,16 @@ The operator polls `/v1/operator/drain` on the coordinator to get pending tasks 
 | GET | `/v1/search?label=cat&dataset=train&limit=100` | Label search |
 | GET | `/v1/labels?dataset=train` | Label frequency counts |
 | POST | `/v1/tiering/estimate` | Storage cost projection (body: map of tier → bytes) |
+
+### Level 4 Algorithm Registry (:8080)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/v1/algorithms` | List all registered algorithm versions |
+| POST | `/v1/algorithms` | Submit an algorithm package (zip body); validates against quota and registers it. `X-Tenant` header sets the owner |
+| POST | `/v1/algorithms/validate` | Dry-run: parse and validate a package without registering |
+| GET | `/v1/algorithms/{name}` | List all versions of one algorithm |
+| GET | `/v1/algorithms/{name}/{version}` | Get one algorithm's metadata |
 
 ### Level 2 Coordinator (:8090)
 

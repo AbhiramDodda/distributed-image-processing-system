@@ -15,6 +15,7 @@ import (
 
 	"github.com/abhiramd/petabyte-platform/internal/config"
 	"github.com/abhiramd/petabyte-platform/internal/metadata"
+	"github.com/abhiramd/petabyte-platform/internal/registry"
 	"github.com/abhiramd/petabyte-platform/internal/storage"
 	"github.com/abhiramd/petabyte-platform/internal/tiering"
 )
@@ -38,6 +39,13 @@ func main() {
 	}
 	defer idx.Close()
 
+	reg, err := registry.Open(cfg.Server.RegistryDBPath)
+	if err != nil {
+		log.Error("open algorithm registry", "err", err)
+		os.Exit(1)
+	}
+	defer reg.Close()
+
 	store, err := storage.NewClient(context.Background(), storage.ClientConfig{
 		Endpoint:        cfg.Storage.Endpoint,
 		Region:          cfg.Storage.Region,
@@ -59,6 +67,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	registerRoutes(mux, idx, store, tierEngine, log)
+	algorithmRoutes(mux, reg, registry.DefaultQuota(), log)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{
