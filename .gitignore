@@ -27,6 +27,7 @@ Thumbs.db
 data/
 tmp/
 scratch/
+coordinator-wal/
 
 # Developer progress and internal notes (not for end users)
 PROGRESS.md

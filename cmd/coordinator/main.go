@@ -31,6 +31,13 @@ func main() {
 	coord := coordinator.New(cfg, log)
 	mc := metrics.NewCollector()
 
+	if cfg.Coordinator.WALDir != "" {
+		if err := coord.EnablePersistence(cfg.Coordinator.WALDir, cfg.Coordinator.CheckpointInterval); err != nil {
+			log.Error("enable persistence", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	coord.Start(ctx)
@@ -64,8 +71,10 @@ func main() {
 	<-quit
 	log.Info("shutting down")
 	cancel()
-	coord.Stop()
+	// Stop accepting requests before Stop() writes the final checkpoint and
+	// closes the WAL, so no in-flight handler appends to a closing log.
 	shutCtx, sc := context.WithTimeout(context.Background(), 15*time.Second)
 	defer sc()
 	srv.Shutdown(shutCtx)
+	coord.Stop()
 }

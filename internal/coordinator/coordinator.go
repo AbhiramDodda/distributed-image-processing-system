@@ -2,11 +2,13 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/abhiramd/petabyte-platform/internal/cluster"
 	"github.com/abhiramd/petabyte-platform/internal/config"
+	"github.com/abhiramd/petabyte-platform/internal/pipeline"
 	"github.com/abhiramd/petabyte-platform/internal/scheduler"
 )
 
@@ -18,6 +20,8 @@ type Coordinator struct {
 	ring *cluster.Ring
 	membership *cluster.Membership
 	sched *scheduler.Scheduler
+	wal *pipeline.WAL
+	checkpointInterval time.Duration
 	stopCh chan struct{}
 }
 
@@ -40,12 +44,71 @@ func New(cfg *config.Config, log *slog.Logger) *Coordinator {
 	}
 }
 
+// EnablePersistence opens a WAL under dir, restores the scheduler from it, and
+// attaches it so future state changes are durable. Checkpoints are written
+// every interval (a non-positive interval falls back to 30s). It must be called
+// before Start, and only once.
+func (c *Coordinator) EnablePersistence(dir string, interval time.Duration) error {
+	w, rec, err := pipeline.OpenWAL(dir, c.log)
+	if err != nil {
+		return fmt.Errorf("coordinator: open wal: %w", err)
+	}
+	if err := c.sched.Restore(rec.Snapshot, rec.Records); err != nil {
+		w.Close()
+		return fmt.Errorf("coordinator: restore scheduler: %w", err)
+	}
+	c.sched.AttachStore(w)
+	c.wal = w
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	c.checkpointInterval = interval
+	c.log.Info("coordinator persistence enabled", "dir", dir, "checkpoint_interval", interval)
+	return nil
+}
+
 func (c *Coordinator) Start(ctx context.Context) {
 	go c.tickLoop(ctx)
 	go c.failureEventLoop(ctx)
+	if c.wal != nil {
+		go c.checkpointLoop(ctx)
+	}
 }
 
-func (c *Coordinator) Stop() { close(c.stopCh) }
+func (c *Coordinator) Stop() {
+	close(c.stopCh)
+	if c.wal != nil {
+		if err := c.checkpoint(); err != nil {
+			c.log.Error("coordinator: final checkpoint", "err", err)
+		}
+		c.wal.Close()
+	}
+}
+
+func (c *Coordinator) checkpointLoop(ctx context.Context) {
+	ticker := time.NewTicker(c.checkpointInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := c.checkpoint(); err != nil {
+				c.log.Error("coordinator: checkpoint", "err", err)
+			}
+		case <-c.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Coordinator) checkpoint() error {
+	snap, err := c.sched.Snapshot()
+	if err != nil {
+		return fmt.Errorf("snapshot scheduler: %w", err)
+	}
+	return c.wal.Checkpoint(snap)
+}
 
 func (c *Coordinator) Membership() *cluster.Membership  { return c.membership }
 func (c *Coordinator) Ring() *cluster.Ring              { return c.ring }

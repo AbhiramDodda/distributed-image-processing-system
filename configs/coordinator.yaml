@@ -7,6 +7,8 @@ coordinator:
   dispatch_interval: 1s
   vnodes_per_node: 150
   task_max_retries: 3
+  wal_dir: ./coordinator-wal      # empty disables WAL persistence
+  checkpoint_interval: 30s
 
 metrics:
   enabled: true

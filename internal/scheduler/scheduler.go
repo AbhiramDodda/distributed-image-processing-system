@@ -19,6 +19,7 @@ type Scheduler struct {
 	pendingQ []string
 	ring *cluster.Ring
 	maxRetries int
+	store RecordStore
 	log *slog.Logger
 }
 
@@ -69,6 +70,7 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 	job.Status = JobRunning
 	job.StartedAt = &now
 
+	s.persistLocked()
 	s.log.Info("job submitted", "job_id", job.ID, "dataset", job.Dataset, "tasks", job.TotalTasks)
 	return job, nil
 }
@@ -114,6 +116,7 @@ func (s *Scheduler) PollTasks(workerID string) (*TaskAssignment, error) {
 	t.Status = TaskAssigned
 	t.WorkerID = workerID
 	t.AssignedAt = &now
+	s.persistLocked()
 
 	job := s.jobs[t.JobID]
 	return &TaskAssignment{
@@ -137,6 +140,7 @@ func (s *Scheduler) StartTask(taskID, workerID string) error {
 	now := time.Now()
 	t.Status = TaskRunning
 	t.StartedAt = &now
+	s.persistLocked()
 	return nil
 }
 
@@ -165,11 +169,13 @@ func (s *Scheduler) ReportResult(taskID string, req ResultRequest) error {
 			t.Status = TaskFailed
 			s.updateJob(t.JobID)
 		}
+		s.persistLocked()
 		return nil
 	}
 
 	t.Status = TaskDone
 	s.updateJob(t.JobID)
+	s.persistLocked()
 	return nil
 }
 
@@ -197,6 +203,7 @@ func (s *Scheduler) RebalanceWorker(workerID string) {
 		}
 	}
 	if requeued > 0 {
+		s.persistLocked()
 		s.log.Info("rebalanced tasks from dead worker", "worker_id", workerID, "requeued", requeued)
 	}
 }
@@ -228,6 +235,9 @@ func (s *Scheduler) DrainPending(n int) []TaskAssignment {
 	if n > len(s.pendingQ) {
 		n = len(s.pendingQ)
 	}
+	if n == 0 {
+		return nil
+	}
 	ids := s.pendingQ[:n]
 	s.pendingQ = s.pendingQ[n:]
 	var assignments []TaskAssignment
@@ -252,6 +262,7 @@ func (s *Scheduler) DrainPending(n int) []TaskAssignment {
 			Config:    j.Config,
 		})
 	}
+	s.persistLocked()
 	return assignments
 }
 

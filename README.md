@@ -73,6 +73,14 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - Hard resource limits (`--cpus`, `--memory`, `--gpus`) enforced by the runtime/cgroups; timeout and OOM kills are distinguished so the scheduler can retry vs. fail appropriately.
 - `sandbox-runner` sidecar: a single-shot binary that stages a shard into the input volume, runs the algorithm image, collects `result.json`, uploads declared artifacts, and reports back to the coordinator.
 
+### Level 5 - High-Throughput Data Pipelines (complete)
+
+- NVMe-backed object cache: size-bounded LRU over local disk with single-flight on concurrent misses (a stampede of readers triggers one S3 fetch), crash-safe temp-file + atomic-rename writes, and restart adoption of objects already on disk.
+- Look-ahead prefetcher: streams shard objects with bounded concurrency (a semaphore caps in-flight fetches at `depth`) while preserving submission order via per-key futures, overlapping S3/NVMe latency with GPU compute (double buffering).
+- Write-ahead log for coordinator state: every scheduler mutation is appended (CRC32-framed, fsync'd) and folded into an atomic snapshot by periodic checkpoints. Each record carries a monotonic sequence, so a crash between snapshot-write and log-truncate never double-applies on replay; a torn tail is detected and truncated on recovery. The coordinator restores job/task state on restart -- in-flight jobs survive a crash.
+- Phi-accrual failure detector: models the recent heartbeat inter-arrival distribution and emits a continuous suspicion value `phi = -log10(P(late))` instead of a fixed timeout, so a jittery link tolerates longer gaps than a steady one without hand-tuned thresholds.
+- Output formats for ML frameworks: TFRecord (masked CRC32C framing, interoperable with `tf.data`), WebDataset tar shards (grouped by sample key, deterministic ordering), Apache Arrow columnar batches (one contiguous buffer per field, with IPC transport), and Parquet result files queryable directly by Athena/Spark/DuckDB.
+
 ## Prerequisites
 
 - Go 1.22 or later
@@ -363,6 +371,6 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | 1 | Object storage, sharding, metadata, ingestion, tiering | Complete |
 | 2 | Cluster membership, hash ring, job scheduler, failure detection | Complete |
 | 3 | Kubernetes operator, K8s Job-per-shard, Ray integration, GPU scheduling, HPA | Complete |
-| 4 | Sandboxed algorithm execution (gVisor), resource limits, algorithm registry | Planned |
-| 5 | Apache Arrow pipelines, WAL checkpointing, Parquet output, phi accrual FD | Planned |
+| 4 | Sandboxed algorithm execution (gVisor), resource limits, algorithm registry | Complete |
+| 5 | Apache Arrow pipelines, WAL checkpointing, Parquet output, phi accrual FD | Complete |
 | 6 | gRPC API, OAuth2/OIDC, per-tenant quotas, Raft coordinator HA | Planned |

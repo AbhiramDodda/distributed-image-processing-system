@@ -46,6 +46,8 @@ type CoordinatorConfig struct {
 	DispatchInterval time.Duration `yaml:"dispatch_interval"`
 	VnodesPerNode int `yaml:"vnodes_per_node"`
 	TaskMaxRetries int `yaml:"task_max_retries"`
+	WALDir string `yaml:"wal_dir"`
+	CheckpointInterval time.Duration `yaml:"checkpoint_interval"`
 }
 
 type WorkerConfig struct {
@@ -123,6 +125,8 @@ func DefaultConfig() *Config {
 			DispatchInterval:  1 * time.Second,
 			VnodesPerNode:     150,
 			TaskMaxRetries:    3,
+			WALDir:            "./coordinator-wal",
+			CheckpointInterval: 30 * time.Second,
 		},
 		Worker: WorkerConfig{
 			CoordinatorURL:    "http://localhost:8090",
