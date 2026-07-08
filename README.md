@@ -81,15 +81,18 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - Phi-accrual failure detector: models the recent heartbeat inter-arrival distribution and emits a continuous suspicion value `phi = -log10(P(late))` instead of a fixed timeout, so a jittery link tolerates longer gaps than a steady one without hand-tuned thresholds.
 - Output formats for ML frameworks: TFRecord (masked CRC32C framing, interoperable with `tf.data`), WebDataset tar shards (grouped by sample key, deterministic ordering), Apache Arrow columnar batches (one contiguous buffer per field, with IPC transport), and Parquet result files queryable directly by Athena/Spark/DuckDB.
 
-### Level 6 - Platform API and Multi-Tenancy (in progress)
+### Level 6 - Platform API and Multi-Tenancy (complete)
 
 - Per-tenant quota enforcer: a live admission gauge that reserves cpu/memory/gpu/active-job capacity at job-submit time. The check-and-reserve is atomic under one lock across every dimension, so two jobs that each fit alone cannot both slip past a ceiling they jointly exceed; unknown tenants fail closed. Reservations release idempotently, so a double-free never corrupts the count.
 - Per-tenant usage ledger: monotonic billing counters (CPU/GPU-seconds, bytes read/written, jobs completed) kept separate from the enforcer -- admission is a rise-and-fall gauge, billing is an ever-growing counter. Charges reserved resource-time (what a tenant denied to others), leaving the price per unit to the billing layer.
-- Planned: gRPC coordinator API with server-streaming `WatchJob`, OAuth2/OIDC SSO, token-bucket rate limiting, and Raft-replicated coordinator HA.
+- Token-bucket rate limiter: per-tenant buckets with lazy refill (no background goroutine), so a burst of submissions is admitted while the sustained rate is capped and one tenant cannot drain another's allowance.
+- Authentication and authorization: local HS256 JWT verification (constant-time signature check, hard-rejects the alg-confusion/"none" attack, exp/nbf with leeway) plus coarse resource:verb RBAC (admin/operator/viewer/worker roles, unknown roles grant nothing).
+- gRPC control-plane API: mirrors the HTTP/JSON coordinator API and adds `WatchJob`, a server-streaming RPC that replaces the client poll loop. A unary+stream interceptor chain composes the three pieces above -- authenticate -> authorize (RBAC per method) -> per-tenant rate limit -- before any handler runs. Enabled via `grpc_port` (refuses to start without a `jwt_secret`).
+- Raft coordinator HA: wraps the etcd Raft library (leader election, log replication, membership) behind an FSM + transport, retiring the single-coordinator single-point-of-failure. A 3-node cluster elects a leader, replicates committed commands to every FSM, and survives leader failure -- the surviving majority elects a new leader and keeps committing with no split brain.
 
 ## Prerequisites
 
-- Go 1.22 or later
+- Go 1.26 or later (required by the Level 6 Raft dependency; earlier levels build on 1.22+)
 - MinIO running locally (or AWS S3 credentials)
 
 Start MinIO with Docker:
@@ -379,4 +382,4 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | 3 | Kubernetes operator, K8s Job-per-shard, Ray integration, GPU scheduling, HPA | Complete |
 | 4 | Sandboxed algorithm execution (gVisor), resource limits, algorithm registry | Complete |
 | 5 | Apache Arrow pipelines, WAL checkpointing, Parquet output, phi accrual FD | Complete |
-| 6 | Per-tenant quotas + usage ledger; gRPC API, OAuth2/OIDC, Raft HA planned | In progress |
+| 6 | Per-tenant quotas + ledger, token-bucket limiter, JWT auth + RBAC, gRPC API + WatchJob, Raft HA | Complete |

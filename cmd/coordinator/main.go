@@ -5,15 +5,22 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
+	"github.com/abhiramd/petabyte-platform/internal/auth"
 	"github.com/abhiramd/petabyte-platform/internal/config"
 	"github.com/abhiramd/petabyte-platform/internal/coordinator"
 	"github.com/abhiramd/petabyte-platform/internal/metrics"
+	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
+	"github.com/abhiramd/petabyte-platform/internal/rpc"
+	"github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb"
 )
 
 func main() {
@@ -57,6 +64,12 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	grpcSrv, err := startGRPC(cfg, coord, log)
+	if err != nil {
+		log.Error("start grpc", "err", err)
+		os.Exit(1)
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -76,5 +89,46 @@ func main() {
 	shutCtx, sc := context.WithTimeout(context.Background(), 15*time.Second)
 	defer sc()
 	srv.Shutdown(shutCtx)
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+	}
 	coord.Stop()
+}
+
+// startGRPC brings up the Level 6 gRPC control-plane API when a grpc_port is
+// configured, guarded by the auth/RBAC/rate-limit interceptor chain. It returns a
+// nil server (and no error) when gRPC is disabled, so the coordinator runs
+// HTTP-only by default. The scheduler is served directly -- it satisfies
+// rpc.JobService.
+func startGRPC(cfg *config.Config, coord *coordinator.Coordinator, log *slog.Logger) (*grpc.Server, error) {
+	cc := cfg.Coordinator
+	if cc.GRPCPort <= 0 {
+		return nil, nil
+	}
+	if cc.JWTSecret == "" {
+		return nil, fmt.Errorf("grpc_port set but jwt_secret is empty; refusing to serve an unauthenticated API")
+	}
+
+	verifier := auth.NewVerifier([]byte(cc.JWTSecret), 30*time.Second)
+	limiter := ratelimit.New(cc.RateLimitPerSec, cc.RateLimitBurst)
+	ic := rpc.NewAuthInterceptor(verifier, auth.DefaultPolicy(), limiter)
+
+	grpcSrv := grpc.NewServer(
+		grpc.UnaryInterceptor(ic.Unary),
+		grpc.StreamInterceptor(ic.Stream),
+	)
+	coordinatorpb.RegisterCoordinatorServer(grpcSrv, rpc.NewServer(coord.Scheduler(), 0))
+
+	grpcAddr := fmt.Sprintf("%s:%d", cc.Host, cc.GRPCPort)
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen grpc %s: %w", grpcAddr, err)
+	}
+	go func() {
+		log.Info("coordinator grpc listening", "addr", grpcAddr)
+		if err := grpcSrv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			log.Error("grpc serve", "err", err)
+		}
+	}()
+	return grpcSrv, nil
 }

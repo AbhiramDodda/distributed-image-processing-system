@@ -48,6 +48,13 @@ type CoordinatorConfig struct {
 	TaskMaxRetries int `yaml:"task_max_retries"`
 	WALDir string `yaml:"wal_dir"`
 	CheckpointInterval time.Duration `yaml:"checkpoint_interval"`
+	// gRPC control-plane API (Level 6). Disabled unless GRPCPort > 0. When
+	// enabled, JWTSecret must be set -- the server refuses to start with auth
+	// unconfigured rather than serving an open API.
+	GRPCPort int `yaml:"grpc_port"`
+	JWTSecret string `yaml:"jwt_secret"`
+	RateLimitPerSec float64 `yaml:"rate_limit_per_sec"`
+	RateLimitBurst int `yaml:"rate_limit_burst"`
 }
 
 type WorkerConfig struct {
@@ -127,6 +134,9 @@ func DefaultConfig() *Config {
 			TaskMaxRetries:    3,
 			WALDir:            "./coordinator-wal",
 			CheckpointInterval: 30 * time.Second,
+			GRPCPort:          0,
+			RateLimitPerSec:   50,
+			RateLimitBurst:    100,
 		},
 		Worker: WorkerConfig{
 			CoordinatorURL:    "http://localhost:8090",

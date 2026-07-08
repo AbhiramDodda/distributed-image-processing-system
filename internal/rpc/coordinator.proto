@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package coordinator.v1;
+
+option go_package = "github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb;coordinatorpb";
+
+// Coordinator is the gRPC face of the platform control plane (Level 6). It
+// mirrors the Level 2 HTTP/JSON API but adds WatchJob: a server-streaming call
+// that pushes job progress, replacing the client's GET-poll loop.
+service Coordinator {
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+  rpc GetJob(GetJobRequest) returns (Job);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc PollTasks(PollTasksRequest) returns (PollTasksResponse);
+  rpc StartTask(StartTaskRequest) returns (StartTaskResponse);
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+  rpc WatchJob(WatchJobRequest) returns (stream Job);
+}
+
+// Timestamps are unix nanoseconds; 0 means unset. Avoids a well-known-types
+// import for a field the client renders however it likes.
+message Job {
+  string id = 1;
+  string dataset = 2;
+  string algorithm = 3;
+  map<string, string> config = 4;
+  string status = 5;
+  repeated string shards = 6;
+  int32 total_tasks = 7;
+  int32 done_tasks = 8;
+  int32 failed_tasks = 9;
+  int64 created_at_unix_ns = 10;
+  int64 started_at_unix_ns = 11;
+  int64 finished_at_unix_ns = 12;
+  string error = 13;
+}
+
+message TaskAssignment {
+  string task_id = 1;
+  string job_id = 2;
+  string shard = 3;
+  string dataset = 4;
+  string algorithm = 5;
+  map<string, string> config = 6;
+}
+
+message SubmitJobRequest {
+  string dataset = 1;
+  string algorithm = 2;
+  map<string, string> config = 3;
+  repeated string shards = 4;
+}
+
+message SubmitJobResponse {
+  string job_id = 1;
+  int32 total_tasks = 2;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message ListJobsRequest {}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+
+message PollTasksRequest {
+  string worker_id = 1;
+}
+
+message PollTasksResponse {
+  TaskAssignment assignment = 1;
+  bool has_work = 2;
+}
+
+message StartTaskRequest {
+  string task_id = 1;
+  string worker_id = 2;
+}
+
+message StartTaskResponse {}
+
+message ReportResultRequest {
+  string task_id = 1;
+  string worker_id = 2;
+  int64 images_processed = 3;
+  int64 bytes_read = 4;
+  string output_key = 5;
+  int64 duration_ns = 6;
+  string error = 7;
+}
+
+message ReportResultResponse {}
+
+message WatchJobRequest {
+  string job_id = 1;
+}
