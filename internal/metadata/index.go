@@ -36,7 +36,11 @@ type Index struct {
 }
 
 func Open(path string) (*Index, error) {
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite uses _pragma=NAME(VALUE) query params. The mattn-style
+	// _journal_mode=/_busy_timeout= params are silently ignored by this driver,
+	// which left WAL off and busy_timeout at 0 -> concurrent writers got instant
+	// SQLITE_BUSY instead of waiting.
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
