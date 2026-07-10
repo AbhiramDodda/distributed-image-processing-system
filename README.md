@@ -95,7 +95,7 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - Go 1.26 or later (required by the Level 6 Raft dependency; earlier levels build on 1.22+)
 - MinIO running locally (or AWS S3 credentials)
 
-Start MinIO with Docker:
+**Option A — MinIO via Docker:**
 
 ```sh
 docker run -d -p 9000:9000 -p 9001:9001 \
@@ -111,6 +111,30 @@ docker exec <container> mc alias set local http://localhost:9000 minioadmin mini
 docker exec <container> mc mb local/petabyte-images
 ```
 
+**Option B — MinIO as a standalone binary (no Docker, no root):**
+
+MinIO and its client `mc` are single static Go binaries. This is the simplest path
+on a dev laptop and is the setup used for the 10 GB walkthrough below.
+
+```sh
+mkdir -p ~/petabyte-demo/bin ~/petabyte-demo/minio-data
+curl -sSLf -o ~/petabyte-demo/bin/minio https://dl.min.io/server/minio/release/linux-amd64/minio
+curl -sSLf -o ~/petabyte-demo/bin/mc    https://dl.min.io/client/mc/release/linux-amd64/mc
+chmod +x ~/petabyte-demo/bin/minio ~/petabyte-demo/bin/mc
+
+# start the server (leave running in another shell)
+MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+  ~/petabyte-demo/bin/minio server ~/petabyte-demo/minio-data \
+  --address :9000 --console-address :9001
+
+# create the bucket (the storage client does NOT auto-create it)
+~/petabyte-demo/bin/mc alias set local http://localhost:9000 minioadmin minioadmin
+~/petabyte-demo/bin/mc mb local/petabyte-images
+```
+
+> **Port note:** the MinIO console binds `:9001`. Do **not** run a worker on 9001 — use
+> 9101+ (see the walkthrough). The default `configs/worker.yaml` uses 9001, which collides.
+
 ## Build
 
 ```sh
@@ -120,6 +144,7 @@ go build -o bin/server ./cmd/server
 go build -o bin/ingest ./cmd/ingest
 go build -o bin/operator ./cmd/operator
 go build -o bin/sandbox-runner ./cmd/sandbox-runner
+go build -o bin/gen-images ./cmd/gen-images   # synthetic dataset generator (see walkthrough)
 ```
 
 ## Testing
@@ -219,6 +244,34 @@ ring lookups); the report test prints it for completeness.
 The consistent-hash ring performs **zero-allocation** lookups -- no garbage is
 produced on the task-routing hot path regardless of cluster size.
 
+### End-to-end local run (10 GB, 44,000 images)
+
+Unlike the microbenchmarks above, this is a full-stack run through MinIO, the ingestion
+pipeline, the coordinator, and three workers on a single laptop -- the first real
+integration validation of the data plane (see the [walkthrough](#end-to-end-walkthrough-on-a-10-gb-dataset)).
+Everything (object store, coordinator, workers) shares one machine, so these numbers
+measure the platform's own overhead against local NVMe, not a real cluster.
+
+| Stage | Result |
+|---|---|
+| Dataset | 44,000 synthetic JPEGs, 10.36 GB (~235 KB each) |
+| Ingest (16-worker pipeline → MinIO) | 44,000 uploaded, **0 failed**, 2m03s → **356 img/s (~84 MB/s)** |
+| Shard balance (SHA-256 routing, 256 shards) | min 130 / max 212 / **avg 171.9** images per shard (ideal 171.9) |
+| Distributed scan (3 workers, 256 tasks) | **8.88 s → 1.17 GB/s aggregate read**, load-balanced 85 / 86 / 85 tasks |
+
+The scan uses the Level 2 `runAlgorithm` placeholder (list shard → read every object →
+report bytes), so 1.17 GB/s is read-and-dispatch throughput, not real inference (the
+gVisor-sandboxed algorithm path is Level 4 and needs Kubernetes). Load balance across
+workers reflects the consistent-hash ring assigning shards; the near-uniform shard fill
+reflects SHA-256 prefix distribution.
+
+**Bug found by this run:** the metadata index opened SQLite with `mattn/go-sqlite3`-style
+DSN params (`?_journal_mode=WAL&_busy_timeout=5000`), which the actual driver
+(`modernc.org/sqlite`) silently ignores -- so WAL was off and `busy_timeout` was 0, and
+the 16-worker ingest hit instant `SQLITE_BUSY` (only 4 of the first 50 index rows
+survived; objects still uploaded fine). Fixed to the driver's `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)`
+form; the 44,000-insert run then completed with zero failures.
+
 ## Quick Start
 
 Start the Level 1 metadata server:
@@ -285,6 +338,103 @@ Request GPU resources for a task:
 ```sh
 -d '{"dataset": "train", "algorithm": "...", "config": {"gpu": "1", "memory": "32Gi"}}'
 ```
+
+## End-to-End Walkthrough on a 10 GB Dataset
+
+A full local run — MinIO, ingestion, coordinator, workers, and a job — validated on
+44,000 synthetic images (10.36 GB). No Docker, no cloud, no GPU. Assumes MinIO is
+running via **Option B** above and the binaries are built into `bin/`.
+
+The pieces talk over HTTP; compute is pulled to where the data lives:
+
+```
+  bin/ingest ──uploads──► MinIO (S3)  ◄──reads shards── bin/worker (xN)
+       │                     ▲                              │
+   metadata.db          holds train/<shard>/<file>   polls for tasks
+   (SQLite)                  │                              ▼
+                       bin/coordinator :8090 ──1 task per shard──►
+```
+
+Run every command below with your working directory set to `~/petabyte-demo` so the
+generated `metadata.db` and `coordinator-wal/` stay out of the repo. Let `$P` point at
+the repo checkout:
+
+```sh
+export P=/path/to/petabyte-platform
+cd ~/petabyte-demo
+```
+
+**1. Generate ~10 GB of synthetic images.** Any folder of `.jpg`/`.png` works; for a
+self-contained test, use the bundled generator. It writes random-noise JPEGs (noise
+compresses poorly, so each is a realistic ~235 KB) named `<class>_<n>.jpg`, which the
+hash-prefix sharding spreads across all 256 shards. ~44,000 files ≈ 10 GB:
+
+```sh
+go build -o bin/gen-images ./cmd/gen-images
+bin/gen-images -out ~/petabyte-demo/images -count 44000 -dim 512
+# -> done: 44000 images in ~2m (≈330 img/s)
+```
+
+(Or skip this and point `-dir` at any real image directory you already have.)
+
+**2. Ingest into the `train` dataset** (16-worker pipeline: SHA-256 checksum → 2-hex
+shard prefix → S3 upload → SQLite index row):
+
+```sh
+$P/bin/ingest -config $P/configs/server.yaml \
+  -dir ~/petabyte-demo/images -dataset train -labels "synthetic,bench"
+# -> processed=44000 failed=0 bytes=10364550448 elapsed=2m03s (356 img/s)
+```
+
+**3. Start the coordinator** (hash ring + scheduler, port 8090):
+
+```sh
+$P/bin/coordinator -config $P/configs/coordinator.yaml &
+```
+
+**4. Start workers on ports 9101+** (NOT 9001 — MinIO's console owns it). Copy
+`configs/worker.yaml` to `worker-demo.yaml`, set `port: 9101` and `poll_interval: 100ms`
+for a snappy local demo, then:
+
+```sh
+for p in 9101 9102 9103; do
+  $P/bin/worker -config ~/petabyte-demo/worker-demo.yaml -id worker-$p -port $p &
+done
+curl -s localhost:8090/v1/cluster/nodes   # all three Active
+curl -s localhost:8090/v1/cluster/ring    # 150 vnodes each
+```
+
+**5. Inspect the sharded dataset** (optional — start the Level 1 server on :8080):
+
+```sh
+$P/bin/server -config $P/configs/server.yaml &
+curl -s "localhost:8080/v1/stats?dataset=train"    # 44000 images, 256 shards, 10.36 GB
+curl -s "localhost:8080/v1/shards?dataset=train"   # per-shard Count (near-uniform)
+```
+
+**6. Submit a job and watch it drain.** One task per shard; workers poll, read every
+object in their shard, and report back:
+
+```sh
+JOB=$(curl -s -X POST localhost:8090/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"dataset":"train","algorithm":"shard-scan"}' | jq -r .job_id)
+
+# poll until done_tasks == 256
+curl -s localhost:8090/v1/jobs/$JOB | jq '{status, done_tasks, failed_tasks}'
+# -> {"status":"completed","done_tasks":256,"failed_tasks":0}  (~9s for all 10 GB)
+```
+
+**7. Tear down** and reclaim disk:
+
+```sh
+pkill -f 'bin/worker'; pkill -f 'bin/coordinator'; pkill -f 'bin/server'
+rm -rf ~/petabyte-demo/images ~/petabyte-demo/minio-data \
+       ~/petabyte-demo/metadata.db* ~/petabyte-demo/coordinator-wal
+```
+
+See [Performance → End-to-end local run](#end-to-end-local-run-10-gb-44000-images) for the
+measured numbers.
 
 ## Running in Kubernetes (Level 3)
 
