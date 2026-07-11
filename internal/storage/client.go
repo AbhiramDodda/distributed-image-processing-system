@@ -112,6 +112,23 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 	return keys, nil
 }
 
+// Copy performs a server-side copy of src to dst within the bucket; no object
+// data flows through this process. It is idempotent in dst — copying different
+// sources to the same dst leaves exactly one object — which is what makes it
+// usable as the commit point of the two-phase result protocol (see
+// scheduler.Committer).
+func (c *Client) Copy(ctx context.Context, src, dst string) error {
+	_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(c.bucket),
+		CopySource: aws.String(fmt.Sprintf("%s/%s", c.bucket, src)),
+		Key:        aws.String(dst),
+	})
+	if err != nil {
+		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	return nil
+}
+
 func (c *Client) CopyStorageClass(ctx context.Context, key, storageClass string) error {
 	_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:       aws.String(c.bucket),

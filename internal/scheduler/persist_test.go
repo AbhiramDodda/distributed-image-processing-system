@@ -1,6 +1,7 @@
 package scheduler_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestScheduler_persistAndRestore(t *testing.T) {
 	if err != nil || a == nil {
 		t.Fatalf("PollTasks: %v (a=%v)", err, a)
 	}
-	if err := s.ReportResult(a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", ImagesProcessed: 10}); err != nil {
+	if err := s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", ImagesProcessed: 10}); err != nil {
 		t.Fatalf("ReportResult: %v", err)
 	}
 

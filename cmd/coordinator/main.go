@@ -21,6 +21,7 @@ import (
 	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
 	"github.com/abhiramd/petabyte-platform/internal/rpc"
 	"github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb"
+	"github.com/abhiramd/petabyte-platform/internal/storage"
 )
 
 func main() {
@@ -37,6 +38,25 @@ func main() {
 
 	coord := coordinator.New(cfg, log)
 	mc := metrics.NewCollector()
+
+	// A configured bucket enables the exactly-once result-commit path: the
+	// coordinator promotes each worker's staged output to its canonical key.
+	// Leaving the bucket empty runs the coordinator storage-free (at-least-once).
+	if cfg.Storage.Bucket != "" {
+		store, err := storage.NewClient(context.Background(), storage.ClientConfig{
+			Endpoint:        cfg.Storage.Endpoint,
+			Region:          cfg.Storage.Region,
+			Bucket:          cfg.Storage.Bucket,
+			AccessKeyID:     cfg.Storage.AccessKeyID,
+			SecretAccessKey: cfg.Storage.SecretAccessKey,
+			UsePathStyle:    cfg.Storage.UsePathStyle,
+		})
+		if err != nil {
+			log.Error("init storage", "err", err)
+			os.Exit(1)
+		}
+		coord.EnableResultCommit(store)
+	}
 
 	if cfg.Coordinator.WALDir != "" {
 		if err := coord.EnablePersistence(cfg.Coordinator.WALDir, cfg.Coordinator.CheckpointInterval); err != nil {

@@ -1,6 +1,7 @@
 package scheduler_test
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -99,7 +100,7 @@ func TestScheduler_concurrentLifecycle(t *testing.T) {
 				if err := s.StartTask(a.TaskID, workerID); err != nil {
 					t.Errorf("StartTask: %v", err)
 				}
-				if err := s.ReportResult(a.TaskID, scheduler.ResultRequest{
+				if err := s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
 					WorkerID:        workerID,
 					ImagesProcessed: 10,
 				}); err != nil {

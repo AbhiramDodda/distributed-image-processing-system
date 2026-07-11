@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -20,6 +21,7 @@ type Scheduler struct {
 	ring *cluster.Ring
 	maxRetries int
 	store RecordStore
+	committer Committer
 	log *slog.Logger
 }
 
@@ -144,14 +146,51 @@ func (s *Scheduler) StartTask(taskID, workerID string) error {
 	return nil
 }
 
-// ReportResult records a task completion or failure.
-func (s *Scheduler) ReportResult(taskID string, req ResultRequest) error {
+// ReportResult records a task completion or failure. On success it runs the
+// two-phase commit: the worker's staged output (req.OutputKey) is promoted to
+// the task's canonical key before the task is durably marked TaskDone. The
+// commit is idempotent, so a duplicate or late report leaves exactly one final
+// object and is otherwise a no-op.
+func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultRequest) error {
+	// Phase 1 (locked): validate and short-circuit an already-committed task, so
+	// a duplicate at-least-once delivery does no work and cannot re-open a task.
+	s.mu.Lock()
+	t, ok := s.tasks[taskID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if t.Status == TaskDone {
+		s.mu.Unlock()
+		return nil
+	}
+	jobID, shard := t.JobID, t.Shard
+	s.mu.Unlock()
+
+	// Phase 2 (unlocked): commit the staged output. This is deliberately outside
+	// the lock — a server-side copy is slow relative to polling — and safe to run
+	// concurrently for the same task because Commit is idempotent in the final
+	// key. The honest gap: a coordinator crash between this copy and the WAL write
+	// below leaves the task not-done, so it re-runs and re-commits; the copy is
+	// idempotent so the *output* is fine, but a real algorithm's external side
+	// effects would not be. Closing that needs copy+mark-done as one entry in a
+	// replicated Raft log (Level 6).
+	if req.Error == "" && req.OutputKey != "" && s.committer != nil {
+		if err := s.committer.Commit(ctx, req.OutputKey, FinalResultKey(jobID, shard)); err != nil {
+			return fmt.Errorf("commit task %s output: %w", taskID, err)
+		}
+	}
+
+	// Phase 3 (locked): record the terminal state and persist it.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	t, ok := s.tasks[taskID]
+	t, ok = s.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if t.Status == TaskDone {
+		return nil // committed by a concurrent duplicate report while unlocked.
 	}
 	now := time.Now()
 	t.FinishedAt = &now

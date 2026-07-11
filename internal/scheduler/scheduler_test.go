@@ -1,6 +1,7 @@
 package scheduler_test
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -83,7 +84,7 @@ func TestScheduler_fullTaskLifecycle_jobCompletes(t *testing.T) {
 			t.Fatalf("poll %d returned nil", i)
 		}
 		s.StartTask(a.TaskID, "worker-1")
-		s.ReportResult(a.TaskID, scheduler.ResultRequest{
+		s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
 			WorkerID:        "worker-1",
 			ImagesProcessed: 100,
 		})
@@ -108,7 +109,7 @@ func TestScheduler_taskError_requeues(t *testing.T) {
 	})
 
 	a, _ := s.PollTasks("worker-1")
-	s.ReportResult(a.TaskID, scheduler.ResultRequest{
+	s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
 		WorkerID: "worker-1",
 		Error:    "network timeout",
 	})
@@ -127,11 +128,11 @@ func TestScheduler_maxRetries_taskFails(t *testing.T) {
 
 	// First attempt
 	a, _ := s.PollTasks("worker-1")
-	s.ReportResult(a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", Error: "fail"})
+	s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", Error: "fail"})
 
 	// Second attempt (the retry)
 	a, _ = s.PollTasks("worker-1")
-	s.ReportResult(a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", Error: "fail again"})
+	s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{WorkerID: "worker-1", Error: "fail again"})
 
 	// No more retries — task and job should be failed
 	if s.PendingCount() != 0 {

@@ -88,7 +88,7 @@ func (f *fakeService) StartTask(taskID, _ string) error {
 	return nil
 }
 
-func (f *fakeService) ReportResult(_ string, req scheduler.ResultRequest) error {
+func (f *fakeService) ReportResult(_ context.Context, _ string, req scheduler.ResultRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.results = append(f.results, req)

@@ -10,6 +10,7 @@ import (
 	"github.com/abhiramd/petabyte-platform/internal/config"
 	"github.com/abhiramd/petabyte-platform/internal/pipeline"
 	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/abhiramd/petabyte-platform/internal/storage"
 )
 
 // Coordinator wires together cluster membership and job scheduling.
@@ -64,6 +65,34 @@ func (c *Coordinator) EnablePersistence(dir string, interval time.Duration) erro
 	}
 	c.checkpointInterval = interval
 	c.log.Info("coordinator persistence enabled", "dir", dir, "checkpoint_interval", interval)
+	return nil
+}
+
+// EnableResultCommit wires the exactly-once commit path: the scheduler promotes
+// each worker's staged output to its canonical key (a server-side copy) before
+// marking the task done. Optional — without it the coordinator records results
+// at-least-once and staged output is never promoted. Call before Start.
+func (c *Coordinator) EnableResultCommit(store *storage.Client) {
+	c.sched.AttachCommitter(storeCommitter{store: store, log: c.log})
+	c.log.Info("coordinator result-commit enabled (exactly-once staging)")
+}
+
+// storeCommitter promotes a staged result to its final key with a server-side
+// copy, then best-effort deletes the staging object (the "move" of the two-phase
+// commit). The copy is the durable step; a failed staging delete only leaves an
+// orphan for a lifecycle rule or sweeper to reclaim, so it is logged, not fatal.
+type storeCommitter struct {
+	store *storage.Client
+	log *slog.Logger
+}
+
+func (c storeCommitter) Commit(ctx context.Context, stagingKey, finalKey string) error {
+	if err := c.store.Copy(ctx, stagingKey, finalKey); err != nil {
+		return err
+	}
+	if err := c.store.Delete(ctx, stagingKey); err != nil {
+		c.log.Warn("staging cleanup failed", "key", stagingKey, "err", err)
+	}
 	return nil
 }
 

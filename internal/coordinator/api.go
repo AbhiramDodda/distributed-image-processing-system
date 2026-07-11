@@ -199,7 +199,7 @@ func (a *API) handleTask(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := a.coord.sched.ReportResult(taskID, req); err != nil {
+		if err := a.coord.sched.ReportResult(r.Context(), taskID, req); err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}

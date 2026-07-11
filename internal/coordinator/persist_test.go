@@ -1,6 +1,7 @@
 package coordinator_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func TestCoordinator_recoversAfterCrash(t *testing.T) {
 	if err != nil || a == nil {
 		t.Fatalf("PollTasks: %v", err)
 	}
-	if err := c1.Scheduler().ReportResult(a.TaskID, scheduler.ResultRequest{WorkerID: "w1"}); err != nil {
+	if err := c1.Scheduler().ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{WorkerID: "w1"}); err != nil {
 		t.Fatalf("ReportResult: %v", err)
 	}
 	// No c1.Stop(): the WAL is left as a crashed process would leave it.

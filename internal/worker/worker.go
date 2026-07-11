@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -189,6 +190,14 @@ func (w *Worker) RunTask(ctx context.Context, a scheduler.TaskAssignment) error 
 
 // runAlgorithm is the Level 2 placeholder. Level 4 replaces this with
 // sandboxed container execution via gVisor.
+//
+// It writes its output to a *staging* key rather than the task's final location.
+// The staged object is invisible to consumers until the coordinator commits it
+// (server-side copy to the canonical key) as it marks the task done. That two-
+// phase split is what upgrades the pipeline from at-least-once to effectively
+// exactly-once: a task that is re-run after a crash or false-positive failure
+// stages a fresh object, but only the coordinator's commit makes any of them the
+// one visible result. See scheduler.StagingResultKey / FinalResultKey.
 func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (int64, int64, string, error) {
 	prefix := fmt.Sprintf("%s/%s/", a.Dataset, a.Shard)
 	keys, err := w.store.ListPrefix(ctx, prefix)
@@ -206,6 +215,22 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 		rc.Close()
 		totalBytes += size
 	}
-	outputKey := fmt.Sprintf("results/%s/%s/%s.json", a.JobID, a.Shard, a.TaskID)
-	return int64(len(keys)), totalBytes, outputKey, nil
+
+	stagingKey := scheduler.StagingResultKey(a.JobID, a.TaskID)
+	result := scheduler.TaskResult{
+		TaskID:          a.TaskID,
+		JobID:           a.JobID,
+		WorkerID:        w.id,
+		ImagesProcessed: int64(len(keys)),
+		BytesRead:       totalBytes,
+		OutputKey:       scheduler.FinalResultKey(a.JobID, a.Shard),
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("marshal result: %w", err)
+	}
+	if err := w.store.Put(ctx, stagingKey, bytes.NewReader(body), "application/json"); err != nil {
+		return 0, 0, "", fmt.Errorf("stage result %s: %w", stagingKey, err)
+	}
+	return int64(len(keys)), totalBytes, stagingKey, nil
 }

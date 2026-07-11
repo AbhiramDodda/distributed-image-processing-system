@@ -25,7 +25,7 @@ type JobService interface {
 	ListJobs() []*scheduler.Job
 	PollTasks(workerID string) (*scheduler.TaskAssignment, error)
 	StartTask(taskID, workerID string) error
-	ReportResult(taskID string, req scheduler.ResultRequest) error
+	ReportResult(ctx context.Context, taskID string, req scheduler.ResultRequest) error
 }
 
 // The production scheduler satisfies JobService as-is, so the gRPC server can be
@@ -105,8 +105,8 @@ func (s *Server) StartTask(_ context.Context, req *coordinatorpb.StartTaskReques
 	return &coordinatorpb.StartTaskResponse{}, nil
 }
 
-func (s *Server) ReportResult(_ context.Context, req *coordinatorpb.ReportResultRequest) (*coordinatorpb.ReportResultResponse, error) {
-	err := s.svc.ReportResult(req.GetTaskId(), scheduler.ResultRequest{
+func (s *Server) ReportResult(ctx context.Context, req *coordinatorpb.ReportResultRequest) (*coordinatorpb.ReportResultResponse, error) {
+	err := s.svc.ReportResult(ctx, req.GetTaskId(), scheduler.ResultRequest{
 		WorkerID: req.GetWorkerId(),
 		ImagesProcessed: req.GetImagesProcessed(),
 		BytesRead: req.GetBytesRead(),
