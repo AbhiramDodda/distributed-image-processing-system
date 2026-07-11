@@ -223,7 +223,7 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 		WorkerID:        w.id,
 		ImagesProcessed: int64(len(keys)),
 		BytesRead:       totalBytes,
-		OutputKey:       scheduler.FinalResultKey(a.JobID, a.Shard),
+		OutputKey:       scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split}),
 	}
 	body, err := json.Marshal(result)
 	if err != nil {

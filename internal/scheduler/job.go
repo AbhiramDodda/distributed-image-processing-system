@@ -50,6 +50,25 @@ type Task struct {
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	Error string `json:"error,omitempty"`
+
+	// Work-stealing range. Offsets are into the shard's filename-sorted object
+	// list; the task owns the half-open slice [RangeStart, RangeEnd). RangeEnd is
+	// -1 until a worker reports the shard size (see RenewLease). Frontier is the
+	// offset of the next unprocessed item the worker has reported; Granted is the
+	// exclusive bound the worker is currently leased to process to. The steal is
+	// safe because it only ever hands off the un-granted tail [Granted, RangeEnd),
+	// which the worker provably has not touched. Invariant across all of these:
+	// RangeStart <= Frontier <= Granted <= RangeEnd (once RangeEnd is known).
+	RangeStart int64 `json:"range_start"`
+	RangeEnd int64 `json:"range_end"`
+	Frontier int64 `json:"frontier"`
+	Granted int64 `json:"granted"`
+	Generation int64 `json:"generation"`
+	// Split is set once a task's range becomes a strict sub-range of its shard
+	// (either it was stolen, or it had its tail stolen). It selects a range-scoped
+	// result key so a shard's pieces don't collide; unsplit tasks keep the flat
+	// per-shard key, so jobs that never split are byte-for-byte unchanged.
+	Split bool `json:"split,omitempty"`
 }
 
 type TaskResult struct {
@@ -70,6 +89,42 @@ type TaskAssignment struct {
 	Dataset string `json:"dataset"`
 	Algorithm string `json:"algorithm"`
 	Config map[string]string `json:"config"`
+
+	// Range the worker should process within the shard. RangeStart is the
+	// inclusive start offset; RangeEnd is the exclusive end (-1 = to end of shard,
+	// discovered by the worker and reported back). Split marks a sub-range
+	// assignment so the worker (and the commit) use a range-scoped result key.
+	// Generation is the lease generation the worker echoes on RenewLease.
+	RangeStart int64 `json:"range_start"`
+	RangeEnd int64 `json:"range_end"`
+	// Bound is the exclusive offset the worker may process up to before it must
+	// RenewLease; it starts one lease chunk ahead of RangeStart so work can begin
+	// without a round-trip.
+	Bound int64 `json:"bound"`
+	Generation int64 `json:"generation"`
+	Split bool `json:"split,omitempty"`
+}
+
+// RenewLeaseRequest is a worker's periodic progress report. Frontier is the
+// absolute offset of its next unprocessed item; Total is the shard's item count
+// as the worker discovered it (recorded once, to make the task splittable);
+// Generation is the lease generation the worker last held.
+type RenewLeaseRequest struct {
+	WorkerID string `json:"worker_id"`
+	Generation int64 `json:"generation"`
+	Frontier int64 `json:"frontier"`
+	Total int64 `json:"total"`
+}
+
+// LeaseRenewal is the scheduler's response to a progress report. Bound is the
+// exclusive offset the worker is now leased to process up to; it may only extend
+// past Bound by renewing again. Stolen is true when the worker's tail was
+// reassigned since it last renewed (its Generation is behind), so it should stop
+// promptly at Bound.
+type LeaseRenewal struct {
+	Generation int64 `json:"generation"`
+	Bound int64 `json:"bound"`
+	Stolen bool `json:"stolen"`
 }
 
 type SubmitJobRequest struct {

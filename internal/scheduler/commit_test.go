@@ -75,7 +75,7 @@ func TestReportResult_commitsStagedOutputOnce(t *testing.T) {
 	})
 	a, _ := s.PollTasks("worker-1")
 
-	final := scheduler.FinalResultKey(job.ID, a.Shard)
+	final := scheduler.FinalResultKey(job.ID, a.Shard, scheduler.Range{})
 	staging := scheduler.StagingResultKey(job.ID, a.TaskID)
 	if err := s.ReportResult(context.Background(), a.TaskID, result(staging)); err != nil {
 		t.Fatalf("ReportResult: %v", err)

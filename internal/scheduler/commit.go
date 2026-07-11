@@ -40,10 +40,24 @@ func StagingResultKey(jobID, taskID string) string {
 	return fmt.Sprintf("staging/%s/%s.json", jobID, taskID)
 }
 
-// FinalResultKey is a task's canonical output location. It embeds neither the
-// task ID nor the attempt, so re-committing — after a retry, a rebalance, or a
-// duplicate report — overwrites the same object: the results/ prefix holds
-// exactly one object per (job, shard).
-func FinalResultKey(jobID, shard string) string {
-	return fmt.Sprintf("results/%s/%s.json", jobID, shard)
+// Range identifies the slice of a shard a (sub-)task covers, for naming its
+// result. Split distinguishes a whole-shard task from one produced by
+// work-stealing; Start/End are offsets into the shard's sorted key list.
+type Range struct {
+	Start int64
+	End int64
+	Split bool
+}
+
+// FinalResultKey is a (sub-)task's canonical output location. A whole-shard task
+// (never split) keeps the flat key results/{job}/{shard}.json, so jobs that
+// never split are byte-for-byte unchanged and re-committing overwrites one
+// object per shard. A split task encodes its range so a shard's pieces occupy
+// distinct, still-deterministic keys — re-committing a given sub-range remains
+// idempotent, and the ranges tile the shard exactly once.
+func FinalResultKey(jobID, shard string, rng Range) string {
+	if !rng.Split {
+		return fmt.Sprintf("results/%s/%s.json", jobID, shard)
+	}
+	return fmt.Sprintf("results/%s/%s/%012d-%012d.json", jobID, shard, rng.Start, rng.End)
 }

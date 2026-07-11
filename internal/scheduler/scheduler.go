@@ -22,8 +22,19 @@ type Scheduler struct {
 	maxRetries int
 	store RecordStore
 	committer Committer
+	leaseChunk int64
 	log *slog.Logger
 }
+
+// defaultLeaseChunk is how many items a worker is granted per lease renewal. It
+// caps how far a worker can run ahead of its last progress report, which bounds
+// the un-granted tail a steal can safely reclaim. Larger = fewer renewals but a
+// coarser steal granularity.
+const defaultLeaseChunk = 1000
+
+// minStealItems is the smallest un-granted tail worth splitting: below this a
+// steal cannot give each side at least one item.
+const minStealItems = 2
 
 func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
 	return &Scheduler{
@@ -31,8 +42,21 @@ func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
 		tasks:      make(map[string]*Task),
 		ring:       ring,
 		maxRetries: maxRetries,
+		leaseChunk: defaultLeaseChunk,
 		log:        log,
 	}
+}
+
+// SetLeaseChunk overrides the per-lease grant size (see defaultLeaseChunk). A
+// non-positive value is ignored. Used to tune steal granularity and to drive
+// deterministic splits in tests.
+func (s *Scheduler) SetLeaseChunk(n int64) {
+	if n <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.leaseChunk = n
 }
 
 func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
@@ -63,6 +87,7 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 			Shard:      shard,
 			Status:     TaskPending,
 			MaxRetries: s.maxRetries,
+			RangeEnd:   -1, // shard size unknown until a worker reports it
 		}
 		s.tasks[t.ID] = t
 		s.pendingQ = append(s.pendingQ, t.ID)
@@ -107,28 +132,77 @@ func (s *Scheduler) PollTasks(workerID string) (*TaskAssignment, error) {
 		idx = fallback
 	}
 	if idx < 0 {
+		// No pending task: try to steal the un-granted tail of the busiest
+		// in-flight task so this otherwise-idle worker has something to do.
+		if t := s.stealLocked(); t != nil {
+			a := s.assignLocked(t, workerID)
+			s.persistLocked()
+			return a, nil
+		}
 		return nil, nil
 	}
 
 	tid := s.pendingQ[idx]
 	s.pendingQ = append(s.pendingQ[:idx], s.pendingQ[idx+1:]...)
 
-	t := s.tasks[tid]
+	a := s.assignLocked(s.tasks[tid], workerID)
+	s.persistLocked()
+	return a, nil
+}
+
+// assignLocked marks t assigned to workerID, grants it a first chunk of work,
+// and returns its assignment. Caller holds s.mu and is responsible for removing
+// t from pendingQ if it was queued.
+func (s *Scheduler) assignLocked(t *Task, workerID string) *TaskAssignment {
 	now := time.Now()
 	t.Status = TaskAssigned
 	t.WorkerID = workerID
 	t.AssignedAt = &now
-	s.persistLocked()
+	s.grantLocked(t)
+	return s.assignmentFor(t)
+}
 
+// resetLeaseLocked returns a task's lease to the start of its owned range, so a
+// reassignment after a retry or a dead-worker rebalance reprocesses the whole
+// range [RangeStart, RangeEnd) from scratch rather than trusting the previous
+// (possibly dead) worker's progress. Idempotent result commit makes the
+// reprocessing safe. Caller holds s.mu.
+func (s *Scheduler) resetLeaseLocked(t *Task) {
+	t.Frontier = t.RangeStart
+	t.Granted = t.RangeStart
+}
+
+// grantLocked extends a task's lease to cover its next chunk of items, never
+// past a known end. It is the only place Granted advances: because a worker may
+// process only up to Granted, the region [Granted, RangeEnd) is guaranteed
+// untouched and therefore safe to steal. Caller holds s.mu.
+func (s *Scheduler) grantLocked(t *Task) {
+	g := t.Frontier + s.leaseChunk
+	if t.RangeEnd >= 0 && g > t.RangeEnd {
+		g = t.RangeEnd
+	}
+	if g > t.Granted {
+		t.Granted = g
+	}
+}
+
+// assignmentFor builds the wire assignment for a task, carrying its work-stealing
+// range. Caller holds s.mu.
+func (s *Scheduler) assignmentFor(t *Task) *TaskAssignment {
 	job := s.jobs[t.JobID]
 	return &TaskAssignment{
-		TaskID:    t.ID,
-		JobID:     t.JobID,
-		Shard:     t.Shard,
-		Dataset:   job.Dataset,
-		Algorithm: job.Algorithm,
-		Config:    job.Config,
-	}, nil
+		TaskID:     t.ID,
+		JobID:      t.JobID,
+		Shard:      t.Shard,
+		Dataset:    job.Dataset,
+		Algorithm:  job.Algorithm,
+		Config:     job.Config,
+		RangeStart: t.RangeStart,
+		RangeEnd:   t.RangeEnd,
+		Bound:      t.Granted,
+		Generation: t.Generation,
+		Split:      t.Split,
+	}
 }
 
 // StartTask marks a task as running.
@@ -165,6 +239,7 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 		return nil
 	}
 	jobID, shard := t.JobID, t.Shard
+	rng := Range{Start: t.RangeStart, End: t.RangeEnd, Split: t.Split}
 	s.mu.Unlock()
 
 	// Phase 2 (unlocked): commit the staged output. This is deliberately outside
@@ -176,7 +251,7 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 	// effects would not be. Closing that needs copy+mark-done as one entry in a
 	// replicated Raft log (Level 6).
 	if req.Error == "" && req.OutputKey != "" && s.committer != nil {
-		if err := s.committer.Commit(ctx, req.OutputKey, FinalResultKey(jobID, shard)); err != nil {
+		if err := s.committer.Commit(ctx, req.OutputKey, FinalResultKey(jobID, shard, rng)); err != nil {
 			return fmt.Errorf("commit task %s output: %w", taskID, err)
 		}
 	}
@@ -202,6 +277,7 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 			t.Retries++
 			t.Status = TaskPending
 			t.WorkerID = ""
+			s.resetLeaseLocked(t)
 			s.pendingQ = append(s.pendingQ, t.ID)
 			s.log.Warn("task queued for retry", "task_id", taskID, "retry", t.Retries)
 		} else {
@@ -216,6 +292,109 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 	s.updateJob(t.JobID)
 	s.persistLocked()
 	return nil
+}
+
+// RenewLease records a worker's progress on a task and extends its lease. It is
+// the mechanism that makes work-stealing safe: a worker may process only up to
+// the returned Bound, so its true progress can never exceed the bound the
+// scheduler last granted. The scheduler therefore knows the un-granted tail
+// [Granted, RangeEnd) is untouched and can hand it to another worker.
+//
+// The worker reports its Frontier (offset of its next unprocessed item) and, on
+// first call, Total (the shard's item count, which fixes RangeEnd for a
+// whole-shard task and makes it splittable). The response's Stolen flag tells a
+// worker whose tail was reassigned to wind down promptly.
+func (s *Scheduler) RenewLease(taskID string, req RenewLeaseRequest) (LeaseRenewal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	t, ok := s.tasks[taskID]
+	if !ok {
+		return LeaseRenewal{}, fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Fix the shard size on first report so the whole-shard task becomes
+	// splittable. Total is the absolute item count; a stolen task already has a
+	// concrete RangeEnd, so this only applies to the original whole-shard task.
+	if t.RangeEnd < 0 && req.Total > 0 {
+		t.RangeEnd = req.Total
+	}
+
+	// Advance the reported frontier monotonically; a late/stale report cannot
+	// move it backwards. Clamp to the (possibly shrunk) end.
+	if req.Frontier > t.Frontier {
+		t.Frontier = req.Frontier
+	}
+	if t.RangeEnd >= 0 && t.Frontier > t.RangeEnd {
+		t.Frontier = t.RangeEnd
+	}
+
+	// Grant the next chunk: the bound the worker may now reach before renewing.
+	s.grantLocked(t)
+	s.persistLocked()
+
+	return LeaseRenewal{
+		Generation: t.Generation,
+		Bound:      t.Granted,
+		Stolen:     req.Generation < t.Generation,
+	}, nil
+}
+
+// stealLocked finds the in-flight task with the largest un-granted tail and
+// splits that tail into a new pending sub-task, returning it ready to assign.
+// The split point lies at or beyond the victim's Granted bound, so no item the
+// victim may have processed is reassigned (no double-processing) and the two
+// ranges stay contiguous (no gap). Shrinking the victim's RangeEnd and bumping
+// its Generation makes the victim stop at the split on its next renewal. Returns
+// nil when no in-flight task has a tail worth splitting. Caller holds s.mu.
+func (s *Scheduler) stealLocked() *Task {
+	var victim *Task
+	var bestTail int64
+	for _, t := range s.tasks {
+		if t.Status != TaskAssigned && t.Status != TaskRunning {
+			continue
+		}
+		if t.RangeEnd < 0 { // shard size not yet reported; not splittable
+			continue
+		}
+		tail := t.RangeEnd - t.Granted // the region the worker has not been leased
+		if tail > bestTail {
+			bestTail, victim = tail, t
+		}
+	}
+	if victim == nil || bestTail < minStealItems {
+		return nil
+	}
+
+	split := victim.Granted + bestTail/2
+	if split <= victim.Granted || split >= victim.RangeEnd {
+		return nil // nothing safely splittable
+	}
+
+	stolen := &Task{
+		ID:         uuid.New().String(),
+		JobID:      victim.JobID,
+		Shard:      victim.Shard,
+		Status:     TaskPending,
+		MaxRetries: victim.MaxRetries,
+		RangeStart: split,
+		RangeEnd:   victim.RangeEnd,
+		Frontier:   split,
+		Granted:    split,
+		Split:      true,
+	}
+	victim.RangeEnd = split
+	victim.Generation++
+	victim.Split = true
+
+	s.tasks[stolen.ID] = stolen
+	if j := s.jobs[victim.JobID]; j != nil {
+		j.TotalTasks++
+	}
+	s.log.Info("stole task tail",
+		"shard", victim.Shard, "victim", victim.ID, "stolen", stolen.ID,
+		"split", split, "stolen_range", fmt.Sprintf("[%d,%d)", stolen.RangeStart, stolen.RangeEnd))
+	return stolen
 }
 
 // RebalanceWorker re-queues all Assigned/Running tasks owned by a dead worker.
@@ -234,6 +413,7 @@ func (s *Scheduler) RebalanceWorker(workerID string) {
 			t.Retries++
 			t.Status = TaskPending
 			t.WorkerID = ""
+			s.resetLeaseLocked(t)
 			s.pendingQ = append(s.pendingQ, t.ID)
 			requeued++
 		} else {
@@ -285,24 +465,30 @@ func (s *Scheduler) DrainPending(n int) []TaskAssignment {
 		if !ok || t.Status != TaskPending {
 			continue
 		}
-		j, ok := s.jobs[t.JobID]
-		if !ok {
+		if _, ok := s.jobs[t.JobID]; !ok {
 			continue
 		}
 		now := time.Now()
 		t.Status = TaskAssigned
 		t.AssignedAt = &now
-		assignments = append(assignments, TaskAssignment{
-			TaskID:    t.ID,
-			JobID:     t.JobID,
-			Shard:     t.Shard,
-			Dataset:   j.Dataset,
-			Algorithm: j.Algorithm,
-			Config:    j.Config,
-		})
+		s.grantLocked(t)
+		assignments = append(assignments, *s.assignmentFor(t))
 	}
 	s.persistLocked()
 	return assignments
+}
+
+// Tasks returns a snapshot copy of all tasks. Copies (not pointers) so callers
+// — a status endpoint, or a test asserting steal invariants — cannot mutate live
+// scheduler state.
+func (s *Scheduler) Tasks() []Task {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Task, 0, len(s.tasks))
+	for _, t := range s.tasks {
+		out = append(out, *t)
+	}
+	return out
 }
 
 func (s *Scheduler) ListJobs() []*Job {
