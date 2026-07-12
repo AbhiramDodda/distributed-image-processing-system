@@ -17,6 +17,7 @@ import (
 	"github.com/abhiramd/petabyte-platform/internal/auth"
 	"github.com/abhiramd/petabyte-platform/internal/config"
 	"github.com/abhiramd/petabyte-platform/internal/coordinator"
+	"github.com/abhiramd/petabyte-platform/internal/diag"
 	"github.com/abhiramd/petabyte-platform/internal/metrics"
 	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
 	"github.com/abhiramd/petabyte-platform/internal/rpc"
@@ -34,6 +35,12 @@ func main() {
 	if err != nil {
 		log.Error("load config", "err", err)
 		os.Exit(1)
+	}
+
+	// Opt-in runtime concurrency diagnostics (lock contention/order, invariant
+	// checks). Off unless PETABYTE_DIAG is truthy; served at /debug/diag.
+	if diag.EnableFromEnv(log) {
+		log.Info("concurrency diagnostics active", "endpoint", "/debug/diag")
 	}
 
 	coord := coordinator.New(cfg, log)

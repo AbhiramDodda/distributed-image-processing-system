@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/abhiramd/petabyte-platform/internal/cluster"
+	"github.com/abhiramd/petabyte-platform/internal/diag"
 	"github.com/abhiramd/petabyte-platform/internal/scheduler"
 )
 
@@ -29,6 +30,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/jobs/", a.handleJob)
 	mux.HandleFunc("/v1/tasks/poll", a.handlePoll)
 	mux.HandleFunc("/v1/tasks/", a.handleTask)
+	// Concurrency diagnostics: lock stats, invariant violations, lock-order
+	// warnings, and (with ?stacks=1) a full goroutine dump. Always registered;
+	// it reports enabled=false and is otherwise inert until PETABYTE_DIAG is set.
+	mux.HandleFunc("/debug/diag", diag.Handler())
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {

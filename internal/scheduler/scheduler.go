@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/abhiramd/petabyte-platform/internal/cluster"
+	"github.com/abhiramd/petabyte-platform/internal/diag"
 	"github.com/abhiramd/petabyte-platform/internal/storage"
 )
 
 type Scheduler struct {
-	mu sync.RWMutex
+	mu diag.RWMutex
 	jobs map[string]*Job
 	tasks map[string]*Task
 	pendingQ []string
@@ -37,7 +37,7 @@ const defaultLeaseChunk = 1000
 const minStealItems = 2
 
 func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
-	return &Scheduler{
+	s := &Scheduler{
 		jobs:       make(map[string]*Job),
 		tasks:      make(map[string]*Task),
 		ring:       ring,
@@ -45,6 +45,8 @@ func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
 		leaseChunk: defaultLeaseChunk,
 		log:        log,
 	}
+	s.mu.SetName("scheduler.mu")
+	return s
 }
 
 // SetLeaseChunk overrides the per-lease grant size (see defaultLeaseChunk). A
@@ -184,6 +186,26 @@ func (s *Scheduler) grantLocked(t *Task) {
 	if g > t.Granted {
 		t.Granted = g
 	}
+	s.checkLeaseInvariant(t)
+}
+
+// checkLeaseInvariant asserts the core work-stealing safety invariant at runtime
+// whenever diagnostics are on: RangeStart <= Frontier <= Granted <= RangeEnd.
+// If it ever fails, a worker was leased past where it may safely run, or a steal
+// reclaimed granted work — exactly the logical race that would otherwise cause
+// silent double-processing. The Enabled() guard keeps this free in production.
+// Caller holds s.mu (the fields are read without further locking).
+func (s *Scheduler) checkLeaseInvariant(t *Task) {
+	if !diag.Enabled() {
+		return
+	}
+	ok := t.RangeStart <= t.Frontier && t.Frontier <= t.Granted
+	if t.RangeEnd >= 0 {
+		ok = ok && t.Granted <= t.RangeEnd
+	}
+	diag.Assert(ok, "lease ordering RangeStart<=Frontier<=Granted<=RangeEnd violated",
+		"task", t.ID, "shard", t.Shard, "start", t.RangeStart, "frontier", t.Frontier,
+		"granted", t.Granted, "end", t.RangeEnd, "generation", t.Generation)
 }
 
 // assignmentFor builds the wire assignment for a task, carrying its work-stealing
@@ -329,6 +351,11 @@ func (s *Scheduler) RenewLease(taskID string, req RenewLeaseRequest) (LeaseRenew
 		t.Frontier = t.RangeEnd
 	}
 
+	// A worker can never legitimately hold a lease generation ahead of the
+	// scheduler's: that would mean a steal it never saw, i.e. a lost bump. Flag it.
+	diag.Assert(req.Generation <= t.Generation, "worker lease generation ahead of scheduler",
+		"task", t.ID, "worker_gen", req.Generation, "task_gen", t.Generation)
+
 	// Grant the next chunk: the bound the worker may now reach before renewing.
 	s.grantLocked(t)
 	s.persistLocked()
@@ -386,6 +413,14 @@ func (s *Scheduler) stealLocked() *Task {
 	victim.RangeEnd = split
 	victim.Generation++
 	victim.Split = true
+
+	// The two guarantees that make the steal safe, checked at runtime: the split
+	// point is strictly past what the victim was leased to touch (no reclaim of
+	// possibly-processed work), and the ranges stay contiguous (no gap/overlap).
+	diag.Assert(stolen.RangeStart >= victim.Granted, "steal reclaimed granted work",
+		"victim", victim.ID, "granted", victim.Granted, "split", split)
+	diag.Assert(victim.RangeEnd == stolen.RangeStart, "steal left a gap or overlap",
+		"victim_end", victim.RangeEnd, "stolen_start", stolen.RangeStart)
 
 	s.tasks[stolen.ID] = stolen
 	if j := s.jobs[victim.JobID]; j != nil {
