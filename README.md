@@ -6,6 +6,8 @@ A cloud-native distributed platform for storing petabyte-scale image datasets an
 
 Multiple researchers submit algorithms that run simultaneously against the same image dataset. The platform handles sharding, scheduling, parallelism, and fault tolerance. Each researcher sees only their own results.
 
+> **Design rationale:** every significant decision — and the alternatives weighed against it, with pros and cons — is documented in [design.md](design.md).
+
 ## Architecture
 
 ```
@@ -88,7 +90,7 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - Token-bucket rate limiter: per-tenant buckets with lazy refill (no background goroutine), so a burst of submissions is admitted while the sustained rate is capped and one tenant cannot drain another's allowance.
 - Authentication and authorization: local HS256 JWT verification (constant-time signature check, hard-rejects the alg-confusion/"none" attack, exp/nbf with leeway) plus coarse resource:verb RBAC (admin/operator/viewer/worker roles, unknown roles grant nothing).
 - gRPC control-plane API: mirrors the HTTP/JSON coordinator API and adds `WatchJob`, a server-streaming RPC that replaces the client poll loop. A unary+stream interceptor chain composes the three pieces above -- authenticate -> authorize (RBAC per method) -> per-tenant rate limit -- before any handler runs. Enabled via `grpc_port` (refuses to start without a `jwt_secret`).
-- Raft coordinator HA: wraps the etcd Raft library (leader election, log replication, membership) behind an FSM + transport, retiring the single-coordinator single-point-of-failure. A 3-node cluster elects a leader, replicates committed commands to every FSM, and survives leader failure -- the surviving majority elects a new leader and keeps committing with no split brain.
+- Raft coordinator HA: wraps the etcd Raft library (leader election, log replication, membership) behind an FSM + transport, retiring the single-coordinator single-point-of-failure. A 3-node cluster elects a leader, replicates committed commands to every FSM, and survives leader failure -- the surviving majority elects a new leader and keeps committing with no split brain. Now driven over a real gRPC transport across separate processes and carrying the exactly-once commit ledger (see [Raft-agreed commit ledger](#raft-agreed-commit-ledger-over-grpc-complete)).
 
 ## Beyond the Levels — Differentiating Deep-Dives (in progress)
 
@@ -101,18 +103,45 @@ framework. Each one is deliberately paired with an honest account of the gap it 
 
 A worker never writes to a task's final location directly. It stages its output to a
 per-attempt staging key; the coordinator commits by an **idempotent server-side copy**
-to the canonical `FinalResultKey(job, shard, range)` and only then durably marks the task
-done in the WAL. Because the copy is attempt-independent, a task re-run after a crash or a
+to the canonical `FinalResultKey(job, shard, range)` and then records the terminal commit
+decision. Because the copy is attempt-independent, a task re-run after a crash or a
 false-positive failure stages a fresh object, but only the coordinator's single commit
-makes any object the visible result — upgrading the pipeline from at-least-once to
-effectively exactly-once. The commit runs **outside** the scheduler lock (a server-side
-copy is slow relative to polling) with a done-guard for idempotency under concurrent
-duplicate reports.
+makes any object the visible result. The copy runs **outside** the scheduler lock (a
+server-side copy is slow relative to polling) with a done-guard for idempotency under
+concurrent duplicate reports.
 
-**Honest gap:** this is not *truly* exactly-once. A coordinator crash between the copy and
-the WAL mark re-runs the task; the copy is idempotent so the output is fine, but a real
-algorithm's external side effects would repeat. Closing it needs copy+mark-done as a
-single entry in the replicated Raft log (Level 6's HA layer is where that lands).
+The commit **decision** is agreed through the **replicated Raft log** (over a real gRPC
+transport — see [the commit ledger below](#raft-agreed-commit-ledger-over-grpc-complete))
+when a `CommitDecider` is attached: it is agreed exactly once across coordinators (no split-brain),
+**fenced by lease generation** (a stale attempt loses to the recorded one), and durable on
+a majority — so a failover leader inherits an authoritative record of committed tasks and
+never re-dispatches one. Verified end-to-end over real gRPC with leader failover
+(`internal/consensus/raftgrpc`, `internal/coordinator/raft_test.go`).
+
+**Honest gap (sharpened, not gone):** this makes the *output* and the *commit decision*
+exactly-once, but not arbitrary *side effects*. A crash *before* the decide re-executes the
+task; its output is unaffected (idempotent copy), but real external side effects would
+repeat. That window is irreducible — it's the fundamental atomic-commit-across-two-systems
+problem (object store + log), not something more consensus can fix. Making side effects
+themselves exactly-once requires **idempotency keys** into the downstream system, which is
+exactly what the deterministic `FinalResultKey` provides for the write the platform controls.
+
+### Raft-agreed commit ledger over gRPC (complete)
+
+The `internal/consensus` package (etcd Raft: leader election, log replication, PreVote/
+CheckQuorum) is wired for genuine **multi-process** HA via a real gRPC transport
+(`internal/consensus/raftgrpc`) — three separate coordinator processes replicate `raftpb`
+messages over the wire, not just an in-process test network. Each coordinator runs a
+`CommitFSM`: a deterministic, fenced ledger of commit decisions (`Apply` keeps the
+highest-generation record per task, so replicas converge and stale attempts are rejected).
+`ReportResult` closes its terminal commit by proposing to this log and waiting for the entry
+to apply (`raftCommitDecider`), re-proposing across a leadership change per Raft's
+drop-and-retry contract. The transport is non-blocking by construction: each peer has a
+bounded queue drained by its own goroutine, so a slow or dead peer never stalls the Raft run
+loop (Raft retransmits what's dropped). Config: `coordinator.raft` (`id`, `port`, `peers`).
+Verified with a 3-node localhost gRPC cluster that elects a leader, replicates commits to
+every FSM, and **survives leader failover** (`internal/consensus/raftgrpc/transport_test.go`,
+`internal/coordinator/raft_test.go`).
 
 ### Intra-shard work stealing (complete)
 
@@ -653,9 +682,10 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | 4 | Sandboxed algorithm execution (gVisor), resource limits, algorithm registry | Complete |
 | 5 | Apache Arrow pipelines, WAL checkpointing, Parquet output, phi accrual FD | Complete |
 | 6 | Per-tenant quotas + ledger, token-bucket limiter, JWT auth + RBAC, gRPC API + WatchJob, Raft HA | Complete |
-| + | Exactly-once two-phase staging commit | Complete |
+| + | Exactly-once two-phase staging commit (Raft-agreed, fenced commit decision) | Complete |
+| + | Multi-process Raft HA over a gRPC transport + replicated commit ledger | Complete |
 | + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live steal demo pending) |
 | + | Runtime concurrency diagnostics (`internal/diag`, `/debug/diag`) | Complete |
 | + | Backpressure & admission control (`internal/admission`, load-shedding + weighted shares) | Complete |
 | + | End-to-end CLIP/LAION similarity-search demo | Planned |
-| + | Raft-integrated exactly-once + causal tracing + chaos harness | Planned |
+| + | Causal event tracing + `-race` chaos harness | Planned |

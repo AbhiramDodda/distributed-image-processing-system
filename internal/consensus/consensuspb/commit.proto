@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package consensus.v1;
+
+option go_package = "github.com/AbhiramDodda/distributed-image-processing-system/internal/consensus/consensuspb;consensuspb";
+
+// CommitCommand is the replicated record of one exactly-once commit decision,
+// serialized as an entry in the Raft log. It has a schema (rather than ad-hoc
+// JSON) because it is a durable, cross-process wire format that may need to evolve
+// with forward/backward compatibility.
+message CommitCommand {
+  string task_id = 1;
+  string job_id = 2;
+  int64 generation = 3; // lease generation; fences stale attempts
+  string final_key = 4; // canonical output location
+}

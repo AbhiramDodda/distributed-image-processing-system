@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package raftgrpc.v1;
+
+option go_package = "github.com/AbhiramDodda/distributed-image-processing-system/internal/consensus/raftgrpc;raftgrpc";
+
+// RaftTransport carries Raft protocol messages between coordinator peers. It is a
+// dumb pipe: the payload is a raftpb.Message marshaled by the consensus layer, so
+// this service never needs to understand Raft semantics -- it only has to deliver
+// bytes, and may drop them (Raft retransmits).
+service RaftTransport {
+  // Step delivers one marshaled raftpb.Message to a peer's Raft node.
+  rpc Step(RaftEnvelope) returns (RaftAck);
+}
+
+message RaftEnvelope {
+  bytes data = 1; // a raftpb.Message, marshaled with google.golang.org/protobuf
+}
+
+message RaftAck {}

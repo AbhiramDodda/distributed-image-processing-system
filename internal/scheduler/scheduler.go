@@ -22,6 +22,7 @@ type Scheduler struct {
 	maxRetries int
 	store RecordStore
 	committer Committer
+	commitDecider CommitDecider
 	leaseChunk int64
 	onJobDone func(jobID string)
 	log *slog.Logger
@@ -281,23 +282,40 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 	}
 	jobID, shard := t.JobID, t.Shard
 	rng := Range{Start: t.RangeStart, End: t.RangeEnd, Split: t.Split}
+	gen := t.Generation
 	s.mu.Unlock()
 
-	// Phase 2 (unlocked): commit the staged output. This is deliberately outside
-	// the lock — a server-side copy is slow relative to polling — and safe to run
-	// concurrently for the same task because Commit is idempotent in the final
-	// key. The honest gap: a coordinator crash between this copy and the WAL write
-	// below leaves the task not-done, so it re-runs and re-commits; the copy is
-	// idempotent so the *output* is fine, but a real algorithm's external side
-	// effects would not be. Closing that needs copy+mark-done as one entry in a
-	// replicated Raft log (Level 6).
+	finalKey := FinalResultKey(jobID, shard, rng)
+
+	// Phase 2 (unlocked): promote the staged output to its canonical key. This is
+	// deliberately outside the lock — a server-side copy is slow relative to
+	// polling — and safe to run concurrently for the same task because Commit is
+	// idempotent in the final key, so a duplicate or late report re-copies
+	// identical bytes.
 	if req.Error == "" && req.OutputKey != "" && s.committer != nil {
-		if err := s.committer.Commit(ctx, req.OutputKey, FinalResultKey(jobID, shard, rng)); err != nil {
+		if err := s.committer.Commit(ctx, req.OutputKey, finalKey); err != nil {
 			return fmt.Errorf("commit task %s output: %w", taskID, err)
 		}
 	}
 
-	// Phase 3 (locked): record the terminal state and persist it.
+	// Phase 3 (unlocked): agree the terminal commit through consensus, when a
+	// decider is configured. This is the atomic, replicated commit point that
+	// upgrades the local WAL mark below: once Decide returns, the task is committed
+	// as a majority-agreed fact (no split-brain), fenced by lease generation
+	// against a stale attempt, so a failover leader never re-dispatches it. The
+	// residual, irreducible window is a crash *before* this call, which re-executes
+	// the task; the Phase 2 copy is idempotent so the output is unaffected, and
+	// true side-effect exactly-once would require idempotency keys into the
+	// downstream system (see design.md §3.1).
+	if req.Error == "" && s.commitDecider != nil {
+		if _, err := s.commitDecider.Decide(ctx, CommitDecision{
+			TaskID: taskID, JobID: jobID, Generation: gen, FinalKey: finalKey,
+		}); err != nil {
+			return fmt.Errorf("commit task %s decision: %w", taskID, err)
+		}
+	}
+
+	// Phase 4 (locked): record the terminal state and persist it.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

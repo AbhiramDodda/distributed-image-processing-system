@@ -188,6 +188,12 @@ func (n *Node) receive(m *raftpb.Message) {
 	}
 }
 
+// Receive is the exported entry point a Transport uses to deliver an inbound Raft
+// message (e.g. a gRPC transport server decoding a peer's raftpb.Message). Like
+// the in-process path it never blocks: a full buffer drops the message and Raft
+// retransmits, so a burst from a peer can never stall the run loop.
+func (n *Node) Receive(m *raftpb.Message) { n.receive(m) }
+
 // Propose submits data to be replicated. It only succeeds on (or via) the
 // leader; Raft forwards a follower's proposal to the leader, but a proposal can
 // still be dropped silently on a leadership change, so callers must retry until

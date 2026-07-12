@@ -10,6 +10,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/admission"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/consensus"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/pipeline"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
@@ -28,6 +29,7 @@ type Coordinator struct {
 	admission *admission.Controller
 	ticketsMu sync.Mutex
 	tickets map[string]*admission.Ticket
+	raftNode *consensus.Node
 	stopCh chan struct{}
 }
 

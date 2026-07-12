@@ -17,6 +17,8 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/admission"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/auth"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/consensus"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/consensus/raftgrpc"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/coordinator"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metrics"
@@ -57,6 +59,21 @@ func main() {
 		coord.EnableAdmission(ctrl)
 		log.Info("admission control active", "max_in_flight_jobs", cfg.Coordinator.MaxInFlightJobs)
 	}
+
+	// Raft consensus: route terminal commits through a replicated log so the
+	// exactly-once commit decision is agreed across coordinators and survives
+	// failover (design.md §3.1). Off unless a raft cluster is configured.
+	var raftStop func()
+	if cfg.Coordinator.Raft.Enabled() {
+		node, fsm, stop, err := startRaft(cfg, log)
+		if err != nil {
+			log.Error("start raft", "err", err)
+			os.Exit(1)
+		}
+		coord.EnableRaftCommit(node, fsm)
+		raftStop = stop
+	}
+
 	mc := metrics.NewCollector()
 
 	// A configured bucket enables the exactly-once result-commit path: the
@@ -132,7 +149,61 @@ func main() {
 	if grpcSrv != nil {
 		grpcSrv.GracefulStop()
 	}
+	if raftStop != nil {
+		raftStop()
+	}
 	coord.Stop()
+}
+
+// startRaft brings up this coordinator's Raft node with the replicated commit
+// FSM and a gRPC transport for peer traffic, plus a listener that feeds inbound
+// peer messages into the node. It returns the node and FSM (for
+// EnableRaftCommit) and a stop function that tears the whole thing down in order.
+func startRaft(cfg *config.Config, log *slog.Logger) (*consensus.Node, *consensus.CommitFSM, func(), error) {
+	rc := cfg.Coordinator.Raft
+	peers := make(map[uint64]string, len(rc.Peers))
+	ids := make([]uint64, 0, len(rc.Peers))
+	for _, p := range rc.Peers {
+		peers[p.ID] = p.Address
+		ids = append(ids, p.ID)
+	}
+
+	transport := raftgrpc.NewTransport(rc.ID, peers, log)
+	fsm := consensus.NewCommitFSM()
+	node, err := consensus.Start(consensus.Config{
+		ID: rc.ID,
+		Peers: ids,
+		FSM: fsm,
+		Transport: transport,
+		Logger: log,
+	}, nil)
+	if err != nil {
+		transport.Close()
+		return nil, nil, nil, fmt.Errorf("start raft node: %w", err)
+	}
+
+	grpcSrv := grpc.NewServer()
+	raftgrpc.RegisterRaftTransportServer(grpcSrv, raftgrpc.NewServer(node))
+	addr := fmt.Sprintf("%s:%d", cfg.Coordinator.Host, rc.Port)
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		node.Stop()
+		transport.Close()
+		return nil, nil, nil, fmt.Errorf("listen raft %s: %w", addr, err)
+	}
+	go func() {
+		log.Info("coordinator raft listening", "addr", addr, "id", rc.ID)
+		if err := grpcSrv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			log.Error("raft serve", "err", err)
+		}
+	}()
+
+	stop := func() {
+		grpcSrv.GracefulStop()
+		node.Stop()
+		transport.Close()
+	}
+	return node, fsm, stop, nil
 }
 
 // startGRPC brings up the Level 6 gRPC control-plane API when a grpc_port is

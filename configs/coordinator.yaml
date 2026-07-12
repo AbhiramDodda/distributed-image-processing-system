@@ -25,6 +25,13 @@ coordinator:
   jwt_secret: ""                  # required when grpc_port > 0; HS256 signing secret
   rate_limit_per_sec: 50          # per-tenant token refill rate at the gRPC gateway
   rate_limit_burst: 100           # per-tenant burst capacity
+  # Raft consensus for multi-process HA + consensus-agreed exactly-once commits.
+  # Disabled unless raft.id > 0 and peers are listed. Each coordinator sets its own
+  # id/port and lists every member (including itself) with its raft gRPC address.
+  raft:
+    id: 0                         # >0 enables raft; this node's raft id
+    port: 8100                    # this node's raft gRPC listener
+    peers: []                     # e.g. [{id: 1, address: "10.0.0.1:8100"}, {id: 2, address: "10.0.0.2:8100"}, ...]
 
 metrics:
   enabled: true

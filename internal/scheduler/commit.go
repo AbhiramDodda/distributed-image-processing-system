@@ -30,6 +30,41 @@ func (s *Scheduler) AttachCommitter(c Committer) {
 	s.committer = c
 }
 
+// CommitDecision is a request to commit one task's result. Generation is the
+// task's lease generation, which fences stale attempts: a decision that loses to
+// a higher generation is not the authoritative one.
+type CommitDecision struct {
+	TaskID string
+	JobID string
+	Generation int64
+	FinalKey string
+}
+
+// CommitDecider records the terminal commit decision for a task through an
+// external agreement protocol -- in production, an entry in the replicated Raft
+// log -- so the decision is made exactly once and every coordinator agrees on it.
+// It closes the split-brain / non-deterministic-recovery gap the local WAL mark
+// leaves open: once Decide returns a winner, that task is committed as a
+// majority-agreed fact and a failover leader will not re-dispatch it.
+//
+// Decide MUST be idempotent and fenced: calling it twice for the same task
+// returns the same winning decision, and a decision with an older Generation than
+// one already recorded loses to it. The returned winner may therefore differ from
+// the argument when a newer attempt already committed. Kept as a narrow interface
+// so the scheduler stays independent of the consensus package.
+type CommitDecider interface {
+	Decide(ctx context.Context, d CommitDecision) (winner CommitDecision, err error)
+}
+
+// AttachCommitDecider routes terminal commits through a consensus-backed decider
+// (see CommitDecider). Without one, a task is marked done by the local WAL path
+// (single-node behavior, unchanged). Call before the scheduler serves traffic.
+func (s *Scheduler) AttachCommitDecider(d CommitDecider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commitDecider = d
+}
+
 // StagingResultKey is where a worker writes a task's output before it is
 // committed. It is keyed by task, not by attempt: retries reuse the same task
 // and produce deterministic output for the same shard, and PutObject is atomic

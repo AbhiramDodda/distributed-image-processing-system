@@ -37,6 +37,24 @@ type MetadataConfig struct {
 	DBPath string `yaml:"db_path"`
 }
 
+// RaftConfig configures this coordinator's membership in the Raft cluster that
+// replicates the commit ledger. ID is this node's Raft id; Port is its raft gRPC
+// listener; Peers lists every member (including self) with the address of its
+// raft listener.
+type RaftConfig struct {
+	ID uint64 `yaml:"id"`
+	Port int `yaml:"port"`
+	Peers []RaftPeer `yaml:"peers"`
+}
+
+type RaftPeer struct {
+	ID uint64 `yaml:"id"`
+	Address string `yaml:"address"`
+}
+
+// Enabled reports whether raft consensus is configured for this coordinator.
+func (r RaftConfig) Enabled() bool { return r.ID > 0 && len(r.Peers) > 0 }
+
 type CoordinatorConfig struct {
 	Host string `yaml:"host"`
 	Port int `yaml:"port"`
@@ -51,6 +69,9 @@ type CoordinatorConfig struct {
 	// Backpressure: global ceiling on concurrently in-flight jobs. Submissions
 	// past it are shed (HTTP 429). Disabled (unbounded) unless > 0.
 	MaxInFlightJobs int `yaml:"max_in_flight_jobs"`
+	// Raft consensus for multi-process HA + consensus-agreed exactly-once commits.
+	// Disabled unless Raft.ID > 0 and Raft.Peers is set.
+	Raft RaftConfig `yaml:"raft"`
 	// gRPC control-plane API (Level 6). Disabled unless GRPCPort > 0. When
 	// enabled, JWTSecret must be set -- the server refuses to start with auth
 	// unconfigured rather than serving an open API.
