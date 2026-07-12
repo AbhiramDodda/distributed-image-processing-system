@@ -175,6 +175,80 @@ func TestCoordinator_fullJobLifecycle(t *testing.T) {
 	}
 }
 
+// TestCoordinator_workStealingOverHTTP is the pass-B end-to-end check: a steal
+// only fires in production once a worker drives the lease-renewal loop over HTTP.
+// One worker takes a whole shard and renews (reporting the shard size, which fixes
+// the range and grants its next chunk); a second, otherwise-idle worker then polls
+// and receives a split sub-task carved from the busy worker's un-granted tail.
+func TestCoordinator_workStealingOverHTTP(t *testing.T) {
+	srv := newTestServer(t)
+	postJSON(t, srv.URL+"/v1/cluster/register", cluster.RegisterRequest{ID: "w0", Address: "localhost:9000"}).Body.Close()
+	postJSON(t, srv.URL+"/v1/cluster/register", cluster.RegisterRequest{ID: "w1", Address: "localhost:9001"}).Body.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/jobs", scheduler.SubmitJobRequest{
+		Dataset: "train", Algorithm: "resnet", Shards: []string{"aa"},
+	})
+	var submit scheduler.SubmitJobResponse
+	decode(t, resp, &submit)
+
+	// w0 takes the whole shard. RangeEnd is -1 until it reports the shard size.
+	pollResp, _ := http.Get(srv.URL + "/v1/tasks/poll?worker=w0")
+	var pr scheduler.PollResponse
+	decode(t, pollResp, &pr)
+	if !pr.HasWork || pr.Assignment == nil {
+		t.Fatal("w0 got no work")
+	}
+	a0 := pr.Assignment
+	if a0.RangeEnd != -1 {
+		t.Fatalf("fresh whole-shard task RangeEnd = %d, want -1", a0.RangeEnd)
+	}
+
+	// w0 renews at the end of its first granted chunk, reporting a 5000-item shard.
+	// That fixes RangeEnd=5000 and grants the next chunk, leaving a stealable tail.
+	renewResp := postJSON(t, fmt.Sprintf("%s/v1/tasks/%s/renew", srv.URL, a0.TaskID),
+		scheduler.RenewLeaseRequest{WorkerID: "w0", Generation: a0.Generation, Frontier: a0.Bound, Total: 5000})
+	var lr scheduler.LeaseRenewal
+	decode(t, renewResp, &lr)
+	if lr.Bound <= a0.Bound {
+		t.Fatalf("renewed bound = %d, want > %d", lr.Bound, a0.Bound)
+	}
+	if lr.Stolen {
+		t.Fatal("w0 reported stolen before any steal happened")
+	}
+
+	// w1 is idle with no pending queue, so its poll must steal w0's un-granted tail.
+	poll1, _ := http.Get(srv.URL + "/v1/tasks/poll?worker=w1")
+	var pr1 scheduler.PollResponse
+	decode(t, poll1, &pr1)
+	if !pr1.HasWork || pr1.Assignment == nil {
+		t.Fatal("w1 got no work: expected a stolen tail")
+	}
+	a1 := pr1.Assignment
+	if a1.TaskID == a0.TaskID {
+		t.Fatal("w1 received w0's task, not a split sub-task")
+	}
+	if !a1.Split {
+		t.Error("stolen assignment not marked Split")
+	}
+	if a1.RangeStart <= lr.Bound || a1.RangeEnd != 5000 {
+		t.Errorf("stolen range = [%d,%d), want start > %d and end 5000", a1.RangeStart, a1.RangeEnd, lr.Bound)
+	}
+
+	// w0's next renewal learns the steal: its Generation is now behind, so Stolen.
+	renew2 := postJSON(t, fmt.Sprintf("%s/v1/tasks/%s/renew", srv.URL, a0.TaskID),
+		scheduler.RenewLeaseRequest{WorkerID: "w0", Generation: a0.Generation, Frontier: lr.Bound})
+	var lr2 scheduler.LeaseRenewal
+	decode(t, renew2, &lr2)
+	if !lr2.Stolen {
+		t.Error("w0 renewal after steal: Stolen = false, want true")
+	}
+	// The victim is now bounded by the split: it may still be granted forward, but
+	// never past where its tail was handed off (that region belongs to w1 now).
+	if lr2.Bound > a1.RangeStart {
+		t.Errorf("victim bound after steal = %d, must not exceed split point %d", lr2.Bound, a1.RangeStart)
+	}
+}
+
 func TestCoordinator_heartbeatUpdatesMetrics(t *testing.T) {
 	srv := newTestServer(t)
 	postJSON(t, srv.URL+"/v1/cluster/register", cluster.RegisterRequest{

@@ -204,24 +204,66 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("list shard %s: %w", a.Shard, err)
 	}
+	// S3 lists keys in lexicographic order, so every worker that lists this shard
+	// sees the same sorted slice; the scheduler's range offsets index into it.
+	total := int64(len(keys))
+
+	// The worker owns [RangeStart, RangeEnd) but may only touch up to Bound before
+	// renewing. end caps slice access; RangeEnd is -1 for an as-yet-unsplit whole
+	// shard, in which case the whole listing is ours until proven otherwise.
+	start := a.RangeStart
+	end := total
+	if a.RangeEnd >= 0 && a.RangeEnd < end {
+		end = a.RangeEnd
+	}
+	bound := a.Bound
+	gen := a.Generation
+
 	var totalBytes int64
-	for _, key := range keys {
-		rc, size, err := w.store.Get(ctx, key)
+	i := start
+	for i < end {
+		// Reached the leased bound: renew to extend it (and, on the first call,
+		// report the shard size so the scheduler can make this task splittable). If
+		// the bound doesn't advance, our tail was reclaimed or the range is spent --
+		// stop cooperatively rather than running past what we're leased to touch.
+		if i >= bound {
+			renewal, err := w.renew(a.TaskID, scheduler.RenewLeaseRequest{
+				WorkerID:   w.id,
+				Generation: gen,
+				Frontier:   i,
+				Total:      total,
+			})
+			if err != nil {
+				w.log.Warn("renew lease failed", "task_id", a.TaskID, "err", err)
+				break
+			}
+			gen, bound = renewal.Generation, renewal.Bound
+			if renewal.Stolen {
+				w.log.Info("lease tail stolen; winding down", "task_id", a.TaskID, "frontier", i, "bound", bound)
+			}
+			if bound <= i {
+				break
+			}
+		}
+		rc, size, err := w.store.Get(ctx, keys[i])
 		if err != nil {
-			w.log.Warn("get object failed", "key", key, "err", err)
+			w.log.Warn("get object failed", "key", keys[i], "err", err)
+			i++
 			continue
 		}
 		io.Copy(io.Discard, rc)
 		rc.Close()
 		totalBytes += size
+		i++
 	}
+	processed := i - start
 
 	stagingKey := scheduler.StagingResultKey(a.JobID, a.TaskID)
 	result := scheduler.TaskResult{
 		TaskID:          a.TaskID,
 		JobID:           a.JobID,
 		WorkerID:        w.id,
-		ImagesProcessed: int64(len(keys)),
+		ImagesProcessed: processed,
 		BytesRead:       totalBytes,
 		OutputKey:       scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split}),
 	}
@@ -232,5 +274,15 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 	if err := w.store.Put(ctx, stagingKey, bytes.NewReader(body), "application/json"); err != nil {
 		return 0, 0, "", fmt.Errorf("stage result %s: %w", stagingKey, err)
 	}
-	return int64(len(keys)), totalBytes, stagingKey, nil
+	return processed, totalBytes, stagingKey, nil
+}
+
+// renew reports progress on a task and returns the extended lease. It is the
+// worker half of the work-stealing protocol: by only advancing up to the bound
+// this returns, the worker guarantees the scheduler that the un-granted tail is
+// untouched and therefore safe to hand to an idle worker.
+func (w *Worker) renew(taskID string, req scheduler.RenewLeaseRequest) (scheduler.LeaseRenewal, error) {
+	var renewal scheduler.LeaseRenewal
+	err := postJSONResp(w.coordinator+"/v1/tasks/"+taskID+"/renew", req, &renewal)
+	return renewal, err
 }

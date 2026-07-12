@@ -90,6 +90,84 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 - gRPC control-plane API: mirrors the HTTP/JSON coordinator API and adds `WatchJob`, a server-streaming RPC that replaces the client poll loop. A unary+stream interceptor chain composes the three pieces above -- authenticate -> authorize (RBAC per method) -> per-tenant rate limit -- before any handler runs. Enabled via `grpc_port` (refuses to start without a `jwt_secret`).
 - Raft coordinator HA: wraps the etcd Raft library (leader election, log replication, membership) behind an FSM + transport, retiring the single-coordinator single-point-of-failure. A 3-node cluster elects a leader, replicates committed commands to every FSM, and survives leader failure -- the surviving majority elects a new leader and keeps committing with no split brain.
 
+## Beyond the Levels — Differentiating Deep-Dives (in progress)
+
+With the six planned levels complete, the platform is growing a set of harder,
+correctness-subtle concurrency problems — the parts that don't reduce to wiring up a
+framework. Each one is deliberately paired with an honest account of the gap it does
+*not* close.
+
+### Exactly-once result commit via two-phase staging (complete)
+
+A worker never writes to a task's final location directly. It stages its output to a
+per-attempt staging key; the coordinator commits by an **idempotent server-side copy**
+to the canonical `FinalResultKey(job, shard, range)` and only then durably marks the task
+done in the WAL. Because the copy is attempt-independent, a task re-run after a crash or a
+false-positive failure stages a fresh object, but only the coordinator's single commit
+makes any object the visible result — upgrading the pipeline from at-least-once to
+effectively exactly-once. The commit runs **outside** the scheduler lock (a server-side
+copy is slow relative to polling) with a done-guard for idempotency under concurrent
+duplicate reports.
+
+**Honest gap:** this is not *truly* exactly-once. A coordinator crash between the copy and
+the WAL mark re-runs the task; the copy is idempotent so the output is fine, but a real
+algorithm's external side effects would repeat. Closing it needs copy+mark-done as a
+single entry in the replicated Raft log (Level 6's HA layer is where that lands).
+
+### Intra-shard work stealing (complete)
+
+The real imbalance here isn't cross-shard — it's *intra-shard*: one giant shard is a single
+task that one worker grinds through alone while others sit idle (the tail-latency problem).
+The fix gives each task a half-open range `[RangeStart, RangeEnd)` over the shard's sorted
+key list plus a lease. Safety comes from **bounded grants**: `RenewLease` grants only the
+next `leaseChunk` items, so a worker's real progress can never exceed `Granted`; the
+scheduler therefore steals only the provably-untouched tail `[Granted, RangeEnd)`. A steal
+splits that tail into a new sub-task, shrinks the victim's `RangeEnd`, and bumps its lease
+generation — the victim learns it was stolen from on its next renewal and winds down
+cooperatively at the split point. The invariant `RangeStart ≤ Frontier ≤ Granted ≤ RangeEnd`
+holds throughout, and the ranges tile the shard with no gap or overlap. It composes with
+exactly-once through range-scoped result keys (a split range writes its own key; an unsplit
+whole shard keeps the flat key). The whole loop is worker-driven over a `/v1/tasks/{id}/renew`
+endpoint: S3 lists keys lexicographically, so the victim and the thief index into the same
+sorted offsets. Verified end-to-end (`TestCoordinator_workStealingOverHTTP`).
+
+**Remaining:** a live MinIO walkthrough that forces a visible steal on a deliberately skewed
+shard (the scheduler core and the worker loop are done and tested; the demo is the last
+mile).
+
+### Runtime concurrency diagnostics (complete)
+
+`internal/diag` is an **opt-in** layer for catching the concurrency bugs ordinary logging
+misses. `diag.Mutex` / `diag.RWMutex` are drop-in `sync` replacements that time wait+hold,
+track the holder, and maintain a global lock-order graph — an inconsistent acquisition order
+(a latent deadlock) is reported the first time it occurs, via a DFS cycle check, *before* it
+ever actually hangs. `diag.Assert` logs loudly (never panics) on an invariant violation with
+detail, goroutine id, and stack; it's wired into the scheduler's lease-ordering, steal
+no-reclaim/contiguity, and generation-monotonicity checks. `GET /debug/diag` returns lock
+stats, recent violations, lock-order warnings, and (with `?stacks=1`) a full goroutine dump —
+the go-to artifact for a hang. Off by default: one atomic load per lock op, nothing for
+asserts. Turn it on with `PETABYTE_DIAG=1`.
+
+**Scope boundary:** this catches *logical* races (invariant assertions) and *deadlocks /
+contention* (instrumented locks + goroutine dumps). It does **not** replace `go test -race`
+for *data* races — the two are complementary.
+
+## Future Plans
+
+- **Backpressure & admission control.** Submitting thousands of jobs schedules hundreds of
+  thousands of tasks at once. Planned: a bounded admission queue, per-tenant job priorities,
+  and a scheduler proven stable under load — with throughput-vs-latency curves reasoned about
+  via queuing theory (Little's Law, USL). A natural extension of the Level 6 quota work.
+- **End-to-end algorithm demo (CLIP / LAION).** Run CLIP embeddings over ~1M public images,
+  store the vectors as Parquet, and build nearest-neighbor image similarity search
+  (brute-force cosine is fine at ≤1M — no Faiss needed). Turns the platform from
+  infrastructure into something demonstrable end-to-end.
+- **Close the exactly-once gap.** Fold the result copy and the done-mark into one replicated
+  Raft log entry so a coordinator crash can't re-run a committed task.
+- **Deeper observability.** Causal event tracing across the coordinator/worker boundary, and a
+  `-race` stress/chaos harness that actively provokes races and deadlocks rather than waiting
+  for them to appear.
+
 ## Prerequisites
 
 - Go 1.26 or later (required by the Level 6 Raft dependency; earlier levels build on 1.22+)
@@ -155,7 +233,7 @@ Run the full test suite (no external services required):
 go test ./...
 ```
 
-The suite covers 117 tests across 13 packages and completes in a few seconds. No Docker or MinIO is needed because:
+The suite covers 200+ tests across 22 packages and completes in a few seconds. No Docker or MinIO is needed because:
 
 - Storage tests exercise sharding logic, tier mapping, and the multipart chunk reader (pure functions, no I/O)
 - Metadata and registry tests use a real SQLite database in a temp directory
@@ -186,9 +264,10 @@ go test ./internal/cluster/... -v
 |---|---|---|
 | `internal/storage` | 9 | ShardKey determinism, 2-hex format, all 256 shards reachable, ObjectKey structure, tier -> S3 class mapping, multipart chunk reader |
 | `internal/cluster` | 21 | Ring empty/single/multi-node, distribution variance (+/-10%), Remove redistribution, LookupN distinct nodes, concurrent churn under -race; Membership Active->Suspect->Dead transitions, recovery, failure events, concurrent heartbeat/tick |
-| `internal/scheduler` | 15 | Submit, poll, start, result, retry, max-retry failure, RebalanceWorker, DrainPending, PendingCount, and concurrent-poll no-double-assignment under -race |
+| `internal/scheduler` | 33 | Submit, poll, start, result, retry, max-retry failure, RebalanceWorker, DrainPending, PendingCount, concurrent-poll no-double-assignment under -race; two-phase commit (dup/concurrent/failure), work-stealing range tiling + lease-generation handoff, and diag invariant checks |
 | `internal/metadata` | 12 | Insert/GetShardManifest, SearchByLabel with limit, ShardStats, DatasetStats, LabelCounts, UpdateTier, RecordsByTierAge, durability after reopen |
-| `internal/coordinator` | 8 | Full register->submit->poll->complete lifecycle via HTTP, heartbeat metrics, /v1/metrics/pending, /v1/operator/drain |
+| `internal/coordinator` | 11 | Full register->submit->poll->complete lifecycle via HTTP, heartbeat metrics, /v1/metrics/pending, /v1/operator/drain, and end-to-end work-stealing steal over the /renew endpoint |
+| `internal/diag` | 7 | Invariant assert record/no-op-when-disabled, bounded violation ring, instrumented Mutex/RWMutex acquisition accounting, and lock-order cycle detection (inconsistent order flagged, consistent order clean) |
 | `internal/k8s` | 9 | JobName format/determinism, batch/v1 spec structure, GPU resources, node affinity from CachedShards, watcher phase resolution + emit/delete against fake API server |
 | `internal/ray` | 7 | Dashboard health check, job submit/get, WaitForJob terminal-state polling and context cancellation |
 | `internal/config` | 5 | DefaultConfig sane values, Load with missing file, overrides, malformed YAML |
@@ -533,3 +612,9 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | 4 | Sandboxed algorithm execution (gVisor), resource limits, algorithm registry | Complete |
 | 5 | Apache Arrow pipelines, WAL checkpointing, Parquet output, phi accrual FD | Complete |
 | 6 | Per-tenant quotas + ledger, token-bucket limiter, JWT auth + RBAC, gRPC API + WatchJob, Raft HA | Complete |
+| + | Exactly-once two-phase staging commit | Complete |
+| + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live steal demo pending) |
+| + | Runtime concurrency diagnostics (`internal/diag`, `/debug/diag`) | Complete |
+| + | Backpressure & admission control | Planned |
+| + | End-to-end CLIP/LAION similarity-search demo | Planned |
+| + | Raft-integrated exactly-once + causal tracing + chaos harness | Planned |

@@ -198,6 +198,18 @@ func (a *API) handleTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+	case "renew":
+		var req scheduler.RenewLeaseRequest
+		if err := decode(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		renewal, err := a.coord.sched.RenewLease(taskID, req)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, renewal)
 	case "result":
 		var req scheduler.ResultRequest
 		if err := decode(r, &req); err != nil {
