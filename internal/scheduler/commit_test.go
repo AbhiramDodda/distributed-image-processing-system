@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // fakeCommitter models an object store: objects maps a final key to the staging

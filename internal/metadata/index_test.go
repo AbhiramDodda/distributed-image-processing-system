@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/metadata"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metadata"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 func openTestIndex(t *testing.T) *metadata.Index {

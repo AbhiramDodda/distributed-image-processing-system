@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
-	"github.com/abhiramd/petabyte-platform/internal/worker"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/worker"
 )
 
 func main() {

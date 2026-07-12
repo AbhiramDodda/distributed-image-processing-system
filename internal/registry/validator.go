@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/abhiramd/petabyte-platform/internal/sandbox"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 )
 
 // Quota is the per-tenant ceiling an algorithm's declared resources must fit

@@ -13,10 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 type Worker struct {

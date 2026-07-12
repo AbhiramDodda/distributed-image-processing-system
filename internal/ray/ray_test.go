@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/ray"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/ray"
 )
 
 func TestHealthCheck_success(t *testing.T) {

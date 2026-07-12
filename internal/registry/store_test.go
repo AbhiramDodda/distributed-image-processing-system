@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/sandbox"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 )
 
 func openTestStore(t *testing.T) *Store {

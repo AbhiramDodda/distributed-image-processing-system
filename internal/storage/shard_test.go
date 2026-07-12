@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 func TestShardKey_deterministic(t *testing.T) {

@@ -27,6 +27,9 @@ type Job struct {
 	Dataset string `json:"dataset"`
 	Algorithm string `json:"algorithm"`
 	Config map[string]string `json:"config"`
+	// Priority orders dispatch under contention: a worker with no local task
+	// prefers the highest-priority pending task. Higher wins; default 0.
+	Priority int `json:"priority,omitempty"`
 	Status JobStatus `json:"status"`
 	Shards []string `json:"shards"`
 	TotalTasks int `json:"total_tasks"`
@@ -44,6 +47,7 @@ type Task struct {
 	Shard string `json:"shard"`
 	WorkerID string `json:"worker_id,omitempty"`
 	Status TaskStatus `json:"status"`
+	Priority int `json:"priority,omitempty"` // inherited from the job; orders dispatch
 	Retries int `json:"retries"`
 	MaxRetries int `json:"max_retries"`
 	AssignedAt *time.Time `json:"assigned_at,omitempty"`
@@ -132,6 +136,7 @@ type SubmitJobRequest struct {
 	Algorithm string `json:"algorithm"`
 	Config map[string]string `json:"config,omitempty"`
 	Shards []string `json:"shards,omitempty"`
+	Priority int `json:"priority,omitempty"`
 }
 
 type SubmitJobResponse struct {

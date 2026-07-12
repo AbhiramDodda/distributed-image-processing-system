@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/diag"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // With diagnostics on, a full work-stealing run must not trip a single runtime

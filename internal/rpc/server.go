@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // JobService is the slice of the scheduler the gRPC layer needs. Declaring it

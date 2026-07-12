@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/coordinator"
-	"github.com/abhiramd/petabyte-platform/internal/metadata"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/coordinator"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metadata"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 var discardLog = slog.New(slog.NewTextHandler(io.Discard, nil))

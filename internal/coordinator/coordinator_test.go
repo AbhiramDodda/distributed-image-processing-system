@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/coordinator"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/coordinator"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 var testLog = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

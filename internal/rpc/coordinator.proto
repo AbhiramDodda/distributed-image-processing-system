@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package coordinator.v1;
 
-option go_package = "github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb;coordinatorpb";
+option go_package = "github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb;coordinatorpb";
 
 // Coordinator is the gRPC face of the platform control plane (Level 6). It
 // mirrors the Level 2 HTTP/JSON API but adds WatchJob: a server-streaming call

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/ingestion"
-	"github.com/abhiramd/petabyte-platform/internal/metadata"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/ingestion"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metadata"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 func main() {

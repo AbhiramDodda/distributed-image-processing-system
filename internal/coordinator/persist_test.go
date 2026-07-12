@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/coordinator"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/coordinator"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 func persistCfg() *config.Config {

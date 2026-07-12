@@ -14,15 +14,16 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/abhiramd/petabyte-platform/internal/auth"
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/coordinator"
-	"github.com/abhiramd/petabyte-platform/internal/diag"
-	"github.com/abhiramd/petabyte-platform/internal/metrics"
-	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
-	"github.com/abhiramd/petabyte-platform/internal/rpc"
-	"github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/admission"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/auth"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/coordinator"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metrics"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/ratelimit"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 func main() {
@@ -44,6 +45,18 @@ func main() {
 	}
 
 	coord := coordinator.New(cfg, log)
+
+	// Backpressure: a bounded admission controller sheds job submissions past the
+	// platform's stable operating point (HTTP 429) instead of queuing them
+	// unboundedly. Off unless max_in_flight_jobs is configured. A single "default"
+	// tenant gets the whole capacity here; the multi-tenant API sets per-tenant
+	// classes so no tenant's burst can starve another.
+	if cfg.Coordinator.MaxInFlightJobs > 0 {
+		ctrl := admission.New(admission.Config{MaxInFlight: cfg.Coordinator.MaxInFlightJobs})
+		ctrl.SetClass("default", admission.Class{Weight: 1})
+		coord.EnableAdmission(ctrl)
+		log.Info("admission control active", "max_in_flight_jobs", cfg.Coordinator.MaxInFlightJobs)
+	}
 	mc := metrics.NewCollector()
 
 	// A configured bucket enables the exactly-once result-commit path: the

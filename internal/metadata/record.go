@@ -3,7 +3,7 @@ package metadata
 import (
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 // DataRecord is the per-image metadata entry stored in the index.

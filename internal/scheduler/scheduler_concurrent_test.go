@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // TestScheduler_concurrentPoll_noDoubleAssignment is the core correctness test

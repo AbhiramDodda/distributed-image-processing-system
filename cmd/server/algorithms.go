@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/abhiramd/petabyte-platform/internal/registry"
-	"github.com/abhiramd/petabyte-platform/internal/sandbox"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/registry"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 )
 
 // imageRegistry is where built algorithm images are pushed. In production this

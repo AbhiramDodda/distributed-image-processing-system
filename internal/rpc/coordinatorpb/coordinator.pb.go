@@ -931,7 +931,7 @@ const file_internal_rpc_coordinator_proto_rawDesc = "" +
 	"\tPollTasks\x12 .coordinator.v1.PollTasksRequest\x1a!.coordinator.v1.PollTasksResponse\x12P\n" +
 	"\tStartTask\x12 .coordinator.v1.StartTaskRequest\x1a!.coordinator.v1.StartTaskResponse\x12Y\n" +
 	"\fReportResult\x12#.coordinator.v1.ReportResultRequest\x1a$.coordinator.v1.ReportResultResponse\x12B\n" +
-	"\bWatchJob\x12\x1f.coordinator.v1.WatchJobRequest\x1a\x13.coordinator.v1.Job0\x01BPZNgithub.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb;coordinatorpbb\x06proto3"
+	"\bWatchJob\x12\x1f.coordinator.v1.WatchJobRequest\x1a\x13.coordinator.v1.Job0\x01BfZdgithub.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb;coordinatorpbb\x06proto3"
 
 var (
 	file_internal_rpc_coordinator_proto_rawDescOnce sync.Once

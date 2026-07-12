@@ -3,7 +3,7 @@ package registry
 import (
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/sandbox"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 )
 
 func baseManifest() sandbox.Manifest {

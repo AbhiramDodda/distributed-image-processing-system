@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // memStore captures appended records, standing in for a WAL.

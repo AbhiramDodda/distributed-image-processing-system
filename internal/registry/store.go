@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/sandbox"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 	_ "modernc.org/sqlite"
 )
 

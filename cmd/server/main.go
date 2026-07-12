@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/metadata"
-	"github.com/abhiramd/petabyte-platform/internal/registry"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
-	"github.com/abhiramd/petabyte-platform/internal/tiering"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/metadata"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/registry"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/tiering"
 )
 
 func main() {

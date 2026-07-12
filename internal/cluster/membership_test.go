@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 )
 
 var testLog = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

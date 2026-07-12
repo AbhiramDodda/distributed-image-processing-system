@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/config"
-	"github.com/abhiramd/petabyte-platform/internal/pipeline"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/admission"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/pipeline"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 // Coordinator wires together cluster membership and job scheduling.
@@ -23,6 +25,9 @@ type Coordinator struct {
 	sched *scheduler.Scheduler
 	wal *pipeline.WAL
 	checkpointInterval time.Duration
+	admission *admission.Controller
+	ticketsMu sync.Mutex
+	tickets map[string]*admission.Ticket
 	stopCh chan struct{}
 }
 
@@ -94,6 +99,42 @@ func (c storeCommitter) Commit(ctx context.Context, stagingKey, finalKey string)
 		c.log.Warn("staging cleanup failed", "key", stagingKey, "err", err)
 	}
 	return nil
+}
+
+// EnableAdmission puts a bounded admission controller in front of job submission:
+// a submission that would push the platform past its stable operating point is
+// shed (HTTP 429) instead of scheduled. The controller holds one in-flight slot
+// per admitted job; the scheduler's job-done hook releases it the moment the job
+// reaches a terminal state. Optional — without it every submission is scheduled.
+// Call before Start.
+func (c *Coordinator) EnableAdmission(ctrl *admission.Controller) {
+	c.admission = ctrl
+	c.tickets = make(map[string]*admission.Ticket)
+	c.sched.SetJobDoneHook(c.releaseTicket)
+	c.log.Info("coordinator admission control enabled (backpressure)")
+}
+
+// trackTicket records an admitted job's ticket so it can be released on
+// completion. Called after Submit succeeds, before the job can finish.
+func (c *Coordinator) trackTicket(jobID string, t *admission.Ticket) {
+	c.ticketsMu.Lock()
+	c.tickets[jobID] = t
+	c.ticketsMu.Unlock()
+}
+
+// releaseTicket frees a finished job's admission slot. It is the scheduler's
+// job-done hook, so it runs under the scheduler lock and only ever takes the
+// coordinator's ticket lock and then the controller's -- a fixed lock order with
+// no path back into the scheduler, so it cannot deadlock. Unknown or already-
+// released job IDs are ignored, making it safe to call more than once.
+func (c *Coordinator) releaseTicket(jobID string) {
+	c.ticketsMu.Lock()
+	t := c.tickets[jobID]
+	delete(c.tickets, jobID)
+	c.ticketsMu.Unlock()
+	if t != nil {
+		t.Release()
+	}
 }
 
 func (c *Coordinator) Start(ctx context.Context) {

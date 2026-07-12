@@ -2,14 +2,16 @@ package coordinator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/diag"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/admission"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 type API struct {
@@ -21,6 +23,7 @@ func NewAPI(coord *Coordinator) *API { return &API{coord: coord} }
 func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.HandleFunc("/v1/metrics/pending", a.handlePendingMetric)
+	mux.HandleFunc("/v1/metrics/admission", a.handleAdmissionMetric)
 	mux.HandleFunc("/v1/operator/drain", a.handleOperatorDrain)
 	mux.HandleFunc("/v1/cluster/register", a.handleRegister)
 	mux.HandleFunc("/v1/cluster/heartbeat", a.handleHeartbeat)
@@ -51,6 +54,22 @@ func (a *API) handlePendingMetric(w http.ResponseWriter, r *http.Request) {
 		"pending_tasks":            pending,
 		"active_workers":           active,
 		"pending_tasks_per_worker": ratio,
+	})
+}
+
+func (a *API) handleAdmissionMetric(w http.ResponseWriter, r *http.Request) {
+	if a.coord.admission == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
+	s := a.coord.admission.Stats()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":              true,
+		"max_in_flight":        s.MaxInFlight,
+		"in_flight":            s.InFlight,
+		"admitted_total":       s.Admitted,
+		"rejected_total":       s.Rejected,
+		"per_tenant_in_flight": s.PerTenant,
 	})
 }
 
@@ -125,10 +144,37 @@ func (a *API) handleJobs(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Backpressure: admit (or shed) the job before it is scheduled. A rejection
+		// is a 429 with Retry-After, not an error -- the platform is protecting its
+		// stable operating point, and the client should back off and retry.
+		var ticket *admission.Ticket
+		if a.coord.admission != nil {
+			tenant := r.Header.Get("X-Tenant")
+			if tenant == "" {
+				tenant = "default"
+			}
+			tk, err := a.coord.admission.Admit(tenant)
+			if err != nil {
+				if errors.Is(err, admission.ErrRejected) {
+					w.Header().Set("Retry-After", "1")
+					writeError(w, http.StatusTooManyRequests, err.Error())
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			ticket = tk
+		}
 		job, err := a.coord.sched.Submit(req)
 		if err != nil {
+			if ticket != nil {
+				ticket.Release()
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if ticket != nil {
+			a.coord.trackTicket(job.ID, ticket)
 		}
 		writeJSON(w, http.StatusCreated, scheduler.SubmitJobResponse{
 			JobID:      job.ID,

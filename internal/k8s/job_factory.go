@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // Minimal K8s batch/v1 Job types — avoids pulling in the full k8s.io/api tree.

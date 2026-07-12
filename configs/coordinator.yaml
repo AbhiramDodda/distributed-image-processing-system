@@ -20,6 +20,7 @@ coordinator:
   task_max_retries: 3
   wal_dir: ./coordinator-wal      # empty disables WAL persistence
   checkpoint_interval: 30s
+  max_in_flight_jobs: 0           # >0 caps concurrently-admitted jobs (backpressure); submissions past it get 429
   grpc_port: 0                    # >0 enables the gRPC control-plane API (Level 6)
   jwt_secret: ""                  # required when grpc_port > 0; HS256 signing secret
   rate_limit_per_sec: 50          # per-tenant token refill rate at the gRPC gateway

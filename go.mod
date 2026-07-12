@@ -1,4 +1,4 @@
-module github.com/abhiramd/petabyte-platform
+module github.com/AbhiramDodda/distributed-image-processing-system
 
 go 1.26
 

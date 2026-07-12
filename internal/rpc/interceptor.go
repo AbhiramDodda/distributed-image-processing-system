@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/abhiramd/petabyte-platform/internal/auth"
-	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/auth"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/ratelimit"
 )
 
 // AuthInterceptor enforces, in order, authentication (verify the bearer JWT),

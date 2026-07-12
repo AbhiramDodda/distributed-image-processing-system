@@ -152,12 +152,51 @@ asserts. Turn it on with `PETABYTE_DIAG=1`.
 contention* (instrumented locks + goroutine dumps). It does **not** replace `go test -race`
 for *data* races — the two are complementary.
 
+### Backpressure & admission control (complete)
+
+Submitting a thousand jobs schedules a quarter-million tasks at once — the scheduler's
+working set explodes and tail latency grows without bound. The fix is a bounded
+admission layer (`internal/admission`) that **sheds load rather than queuing it**. A global
+`MaxInFlight` cap on concurrently-admitted jobs is the backpressure valve: past it, a
+submission gets a fast `429` + `Retry-After` instead of joining an unbounded queue. Each
+admitted job holds one in-flight slot for its lifetime; the scheduler's job-done hook
+releases the slot the instant the job reaches a terminal state. Capacity is partitioned
+across tenants by **weight**, so one tenant's burst can't starve another (isolation), and a
+job's `Priority` orders dispatch — an idle worker with no local task is handed the
+highest-priority pending work.
+
+Why *shed* instead of *queue* — the reasoning is queuing-theoretic, not a hunch:
+
+- **Little's Law (`L = λW`).** With arrival rate `λ` at or above service capacity, an
+  unbounded queue's occupancy `L` — and therefore its wait `W` — grows without limit: the
+  classic latency collapse of a system that looked healthy at steady state. Bounding
+  in-flight work at `L_max` fixes the working set, so `W = L_max / throughput` stays bounded
+  *regardless of arrival rate*. Backpressure trades a few rejected submissions for a latency
+  ceiling.
+- **Erlang-B loss model.** A tenant with a share of `c` slots is an `M/M/c/c` loss system.
+  Its blocking probability is the closed form `B(ρ, c) = (ρ^c / c!) / Σ_{k=0..c} ρ^k/k!`,
+  where `ρ` is offered load (arrival rate × mean job holding time). So "what fraction of a
+  tenant's submissions are shed at load `ρ`?" is a design knob you can compute up front, not
+  an emergent surprise under pressure.
+- **Sizing `MaxInFlight`.** Set it at the *knee* of the load curve — where the Universal
+  Scalability Law's coherency/contention term starts to flatten throughput — not from raw
+  CPU/GPU totals. Past the knee, more concurrency buys latency, not work.
+
+**Honest trade-off:** per-tenant hard shares favour *isolation over utilisation* — a quiet
+tenant's reserved slots sit idle rather than being lent to a busy neighbour. Work-conserving
+weighted fair queuing would reclaim that idle capacity, but only by reintroducing a real
+queue (and the unbounded-latency risk it then has to re-bound). The loss-system design is
+simpler, predictable, and analyzable in closed form, which is the right default for a
+platform whose main multi-tenant job is *not letting one tenant hurt another*.
+
+Config: `max_in_flight_jobs` in `coordinator.yaml` (disabled/unbounded when unset).
+Observability: `GET /v1/metrics/admission` (in-flight, lifetime admitted/rejected, per-tenant
+load). Verified: `internal/admission` unit tests (fairness, isolation, a concurrent burst
+that never exceeds the cap) plus `TestAdmission_shedsThenReadmitsAfterCompletion` end-to-end
+over HTTP.
+
 ## Future Plans
 
-- **Backpressure & admission control.** Submitting thousands of jobs schedules hundreds of
-  thousands of tasks at once. Planned: a bounded admission queue, per-tenant job priorities,
-  and a scheduler proven stable under load — with throughput-vs-latency curves reasoned about
-  via queuing theory (Little's Law, USL). A natural extension of the Level 6 quota work.
 - **End-to-end algorithm demo (CLIP / LAION).** Run CLIP embeddings over ~1M public images,
   store the vectors as Parquet, and build nearest-neighbor image similarity search
   (brute-force cosine is fine at ≤1M — no Faiss needed). Turns the platform from
@@ -268,6 +307,7 @@ go test ./internal/cluster/... -v
 | `internal/metadata` | 12 | Insert/GetShardManifest, SearchByLabel with limit, ShardStats, DatasetStats, LabelCounts, UpdateTier, RecordsByTierAge, durability after reopen |
 | `internal/coordinator` | 11 | Full register->submit->poll->complete lifecycle via HTTP, heartbeat metrics, /v1/metrics/pending, /v1/operator/drain, and end-to-end work-stealing steal over the /renew endpoint |
 | `internal/diag` | 7 | Invariant assert record/no-op-when-disabled, bounded violation ring, instrumented Mutex/RWMutex acquisition accounting, and lock-order cycle detection (inconsistent order flagged, consistent order clean) |
+| `internal/admission` | 6 | Fail-closed on unknown tenant, weighted capacity partitioning, per-tenant isolation below the global cap, idempotent release, admitted/rejected accounting, and a concurrent burst that never exceeds the cap or a tenant's share |
 | `internal/k8s` | 9 | JobName format/determinism, batch/v1 spec structure, GPU resources, node affinity from CachedShards, watcher phase resolution + emit/delete against fake API server |
 | `internal/ray` | 7 | Dashboard health check, job submit/get, WaitForJob terminal-state polling and context cancellation |
 | `internal/config` | 5 | DefaultConfig sane values, Load with missing file, overrides, malformed YAML |
@@ -578,6 +618,7 @@ The operator polls `/v1/operator/drain` on the coordinator to get pending tasks 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/v1/metrics/pending` | `{pending_tasks, active_workers, pending_tasks_per_worker}` |
+| GET | `/v1/metrics/admission` | Backpressure load: in-flight, lifetime admitted/rejected, per-tenant (`enabled:false` when unconfigured) |
 | POST | `/v1/operator/drain?n=N` | Atomically drain up to N pending tasks for K8s Job creation |
 
 ## Sharding
@@ -615,6 +656,6 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | + | Exactly-once two-phase staging commit | Complete |
 | + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live steal demo pending) |
 | + | Runtime concurrency diagnostics (`internal/diag`, `/debug/diag`) | Complete |
-| + | Backpressure & admission control | Planned |
+| + | Backpressure & admission control (`internal/admission`, load-shedding + weighted shares) | Complete |
 | + | End-to-end CLIP/LAION similarity-search demo | Planned |
 | + | Raft-integrated exactly-once + causal tracing + chaos harness | Planned |

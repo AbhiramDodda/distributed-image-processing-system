@@ -48,6 +48,9 @@ type CoordinatorConfig struct {
 	TaskMaxRetries int `yaml:"task_max_retries"`
 	WALDir string `yaml:"wal_dir"`
 	CheckpointInterval time.Duration `yaml:"checkpoint_interval"`
+	// Backpressure: global ceiling on concurrently in-flight jobs. Submissions
+	// past it are shed (HTTP 429). Disabled (unbounded) unless > 0.
+	MaxInFlightJobs int `yaml:"max_in_flight_jobs"`
 	// gRPC control-plane API (Level 6). Disabled unless GRPCPort > 0. When
 	// enabled, JWTSecret must be set -- the server refuses to start with auth
 	// unconfigured rather than serving an open API.

@@ -10,9 +10,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/abhiramd/petabyte-platform/internal/auth"
-	"github.com/abhiramd/petabyte-platform/internal/ratelimit"
-	"github.com/abhiramd/petabyte-platform/internal/rpc/coordinatorpb"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/auth"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/ratelimit"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb"
 )
 
 func secured(t *testing.T, svc JobService, limiter *ratelimit.Limiter) (coordinatorpb.CoordinatorClient, *auth.Verifier) {

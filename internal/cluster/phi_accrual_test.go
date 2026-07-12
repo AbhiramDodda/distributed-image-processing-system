@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 )
 
 var phiBase = time.Unix(1_700_000_000, 0)

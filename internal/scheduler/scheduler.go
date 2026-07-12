@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/abhiramd/petabyte-platform/internal/cluster"
-	"github.com/abhiramd/petabyte-platform/internal/diag"
-	"github.com/abhiramd/petabyte-platform/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
 
 type Scheduler struct {
@@ -23,6 +23,7 @@ type Scheduler struct {
 	store RecordStore
 	committer Committer
 	leaseChunk int64
+	onJobDone func(jobID string)
 	log *slog.Logger
 }
 
@@ -49,6 +50,18 @@ func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
 	return s
 }
 
+// SetJobDoneHook registers a callback fired exactly once when a job first
+// reaches a terminal state (completed or failed). The coordinator uses it to
+// release the job's admission ticket. It runs while the scheduler lock is held,
+// so the callback must be non-blocking and must not call back into the scheduler
+// (releasing an admission ticket takes only the controller's own lock, giving a
+// fixed scheduler.mu -> admission.mu order with no cycle).
+func (s *Scheduler) SetJobDoneHook(fn func(jobID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onJobDone = fn
+}
+
 // SetLeaseChunk overrides the per-lease grant size (see defaultLeaseChunk). A
 // non-positive value is ignored. Used to tune steal granularity and to drive
 // deterministic splits in tests.
@@ -72,6 +85,7 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 		Dataset:    req.Dataset,
 		Algorithm:  req.Algorithm,
 		Config:     req.Config,
+		Priority:   req.Priority,
 		Status:     JobPending,
 		Shards:     shards,
 		TotalTasks: len(shards),
@@ -88,6 +102,7 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 			JobID:      job.ID,
 			Shard:      shard,
 			Status:     TaskPending,
+			Priority:   job.Priority,
 			MaxRetries: s.maxRetries,
 			RangeEnd:   -1, // shard size unknown until a worker reports it
 		}
@@ -114,6 +129,7 @@ func (s *Scheduler) PollTasks(workerID string) (*TaskAssignment, error) {
 	// Fall back to any available task if none match.
 	preferred := -1
 	fallback := -1
+	fallbackPri := 0
 	for i, tid := range s.pendingQ {
 		t, ok := s.tasks[tid]
 		if !ok || t.Status != TaskPending {
@@ -124,8 +140,11 @@ func (s *Scheduler) PollTasks(workerID string) (*TaskAssignment, error) {
 			preferred = i
 			break
 		}
-		if fallback < 0 {
+		// No local task yet: hand idle capacity to the highest-priority pending
+		// work, so an urgent job jumps the queue on non-owning workers.
+		if fallback < 0 || t.Priority > fallbackPri {
 			fallback = i
+			fallbackPri = t.Priority
 		}
 	}
 
@@ -571,4 +590,7 @@ func (s *Scheduler) updateJob(jobID string) {
 		j.Status = JobCompleted
 	}
 	s.log.Info("job finished", "job_id", jobID, "status", j.Status)
+	if s.onJobDone != nil {
+		s.onJobDone(jobID)
+	}
 }

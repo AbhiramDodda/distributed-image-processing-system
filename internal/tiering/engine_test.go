@@ -3,8 +3,8 @@ package tiering_test
 import (
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/storage"
-	"github.com/abhiramd/petabyte-platform/internal/tiering"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/tiering"
 )
 
 func TestCostProjection_zero(t *testing.T) {

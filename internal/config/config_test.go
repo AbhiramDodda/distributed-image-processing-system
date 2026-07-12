@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abhiramd/petabyte-platform/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
 )
 
 func TestDefaultConfig_saneDefaults(t *testing.T) {

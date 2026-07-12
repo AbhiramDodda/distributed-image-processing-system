@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/abhiramd/petabyte-platform/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 )
 
 // submitOneShard submits a single-shard job and returns the job.
