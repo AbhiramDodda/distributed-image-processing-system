@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 )
 
@@ -63,6 +65,48 @@ func (s *Scheduler) AttachCommitDecider(d CommitDecider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.commitDecider = d
+}
+
+// SideEffect is an external action the platform performs on behalf of a task once
+// its commit is agreed -- publishing a completion event, notifying a downstream
+// pipeline, calling a webhook. Unlike the result copy (an object write the
+// platform fully controls, made idempotent by FinalResultKey), a SideEffect
+// reaches a system the platform does not own, so it cannot be committed atomically
+// with the Raft decision. The platform instead makes re-delivery *safe*: Apply is
+// handed the task's deterministic SideEffectKey and is invoked with at-least-once
+// semantics (a crash between Apply and the terminal WAL mark re-delivers under the
+// same key). Apply MUST therefore be idempotent in key -- a receiver that dedupes
+// on the key observes the effect exactly once. See internal/effect for a reference
+// barrier that provides that dedupe.
+type SideEffect interface {
+	Apply(ctx context.Context, key string, d CommitDecision) error
+}
+
+// AttachSideEffect registers the post-commit side effect fired for each committed
+// task (see SideEffect). Without one, no side effect is emitted (unchanged
+// behavior). Call before the scheduler serves traffic.
+func (s *Scheduler) AttachSideEffect(e SideEffect) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sideEffect = e
+}
+
+// SideEffectKey is the deterministic idempotency key for one committed unit of
+// work. It is derived from the unit's canonical identity (job, shard, range) and
+// is therefore attempt-, worker-, and generation-independent: every re-execution
+// of the same logical work -- an at-least-once retry, a work-stealing rebalance, a
+// failover re-dispatch -- derives the identical key. That is exactly the property
+// a downstream needs to deduplicate the redundant deliveries such re-execution
+// produces, so a side effect stamped with this key lands effectively-once.
+//
+// It is the side-effect analogue of FinalResultKey (and is derived from it): the
+// same attempt-independence that makes the output copy idempotent makes this a
+// stable deduplication handle. The key is opaque (a hash) so it is safe to hand to
+// untrusted algorithm code as PETABYTE_IDEMPOTENCY_KEY and to forward to arbitrary
+// downstreams without leaking internal layout.
+func SideEffectKey(jobID, shard string, rng Range) string {
+	sum := sha256.Sum256([]byte(FinalResultKey(jobID, shard, rng)))
+	return "sfx-" + hex.EncodeToString(sum[:16])
 }
 
 // StagingResultKey is where a worker writes a task's output before it is

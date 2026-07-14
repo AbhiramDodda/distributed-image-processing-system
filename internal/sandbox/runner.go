@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,18 @@ type RunnerSpec struct {
 	Image string
 	Limits ResourceLimits
 	Env map[string]string
+	// IdempotencyKey is the task's deterministic side-effect key
+	// (scheduler.SideEffectKey). It is stable across every re-execution of the same
+	// logical work, so the algorithm can forward it to any downstream it mutates
+	// (an idempotency-key header, a dedup column) to make those side effects
+	// exactly-once despite retries and failover. Exposed to the container as
+	// IdempotencyKeyEnv.
+	IdempotencyKey string
 }
+
+// IdempotencyKeyEnv is the environment variable under which the task's
+// deterministic idempotency key is exposed to untrusted algorithm code.
+const IdempotencyKeyEnv = "PETABYTE_IDEMPOTENCY_KEY"
 
 // RunResult is what the runner reports back to the coordinator.
 type RunResult struct {
@@ -65,13 +77,23 @@ func (r Runner) Execute(ctx context.Context, spec RunnerSpec, baseDir string) (*
 		return nil, err
 	}
 
+	// Expose the task's idempotency key to the algorithm without mutating the
+	// caller's map. The algorithm forwards it to any downstream it writes so those
+	// side effects dedupe across re-execution (see RunnerSpec.IdempotencyKey).
+	env := spec.Env
+	if spec.IdempotencyKey != "" {
+		env = make(map[string]string, len(spec.Env)+1)
+		maps.Copy(env, spec.Env)
+		env[IdempotencyKeyEnv] = spec.IdempotencyKey
+	}
+
 	exec, execErr := r.Runtime.Run(ctx, ExecutionSpec{
 		Image: spec.Image,
 		TaskID: spec.TaskID,
 		InputDir: inputDir,
 		OutputDir: outputDir,
 		Args: []string{"/input/manifest.json"},
-		Env: spec.Env,
+		Env: env,
 		Limits: spec.Limits,
 	})
 	result := &RunResult{BytesRead: bytesRead, Execution: exec}

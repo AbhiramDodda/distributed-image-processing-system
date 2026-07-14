@@ -115,6 +115,36 @@ func TestRunner_executeEndToEnd(t *testing.T) {
 	}
 }
 
+// The task's idempotency key must reach the algorithm as an env var so it can
+// forward it to any downstream it mutates -- the propagation half of exactly-once
+// side effects. It must not clobber the caller's own env entries.
+func TestRunner_injectsIdempotencyKey(t *testing.T) {
+	store := newFakeStore()
+	store.objects["train/a3/cat.jpg"] = []byte("x")
+
+	rt := &fakeRuntime{}
+	runner := Runner{Runtime: rt, Store: store}
+	spec := RunnerSpec{
+		TaskID: "task-1", JobID: "job-1", Shard: "a3", Dataset: "train", Image: "img",
+		Env: map[string]string{"MODEL": "resnet"},
+		IdempotencyKey: "sfx-deadbeef",
+	}
+
+	if _, err := runner.Execute(context.Background(), spec, t.TempDir()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := rt.sawSpec.Env[IdempotencyKeyEnv]; got != "sfx-deadbeef" {
+		t.Errorf("%s = %q, want sfx-deadbeef", IdempotencyKeyEnv, got)
+	}
+	if got := rt.sawSpec.Env["MODEL"]; got != "resnet" {
+		t.Errorf("caller env clobbered: MODEL = %q, want resnet", got)
+	}
+	// The caller's map must not have been mutated in place.
+	if _, leaked := spec.Env[IdempotencyKeyEnv]; leaked {
+		t.Error("injected key leaked back into caller's Env map")
+	}
+}
+
 // errRuntime always fails, to verify the runner surfaces sandbox failures.
 type errRuntime struct{}
 

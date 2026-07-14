@@ -311,18 +311,45 @@ of which tasks are committed and never re-dispatches one. Recovery is
 deterministic: committed-ness is a majority fact, not a guess reconstructed from a
 single node's WAL.
 
-**Honest limitation (documented, not hidden):** this makes the *output* and the
-*commit decision* exactly-once, but not arbitrary *side effects*. The
-copy-then-decide ordering leaves an irreducible window — a crash *before* the
-decide re-executes the task. Its output is unaffected (the copy is idempotent in
-the destination), but a real algorithm's external side effects would repeat. That
-residual window cannot be closed by more consensus: it is the fundamental
-atomic-commit-across-heterogeneous-systems problem (the object store and the log
-are two systems, and no single action spans both). The only way to make side
-effects themselves exactly-once is to pass **idempotency keys** into the
-downstream system so *it* dedups — which is exactly what the deterministic,
-attempt-independent `FinalResultKey` does for the one side effect the platform
-controls (the write).
+**The residual window, and how side effects are made safe across it.** Consensus
+makes the *output* and the *commit decision* exactly-once, but not arbitrary
+*side effects*. The copy-then-decide ordering leaves an irreducible window — a
+crash *before* the decide re-executes the task. Its output is unaffected (the copy
+is idempotent in the destination), but a real algorithm's external side effects
+would repeat. That window cannot be closed by more consensus: it is the
+fundamental atomic-commit-across-heterogeneous-systems problem (the object store,
+the log, and the downstream are separate systems, and no single action spans
+them). Two systems cannot be committed atomically — so instead of trying to
+deliver a side effect *exactly* once, the platform delivers it *at-least*-once
+under a stable **idempotency key** and lets the receiver dedup. At-least-once
+delivery + idempotent apply = **effectively-once**.
+
+Concretely (`scheduler.SideEffectKey`, `internal/effect`):
+
+- **A deterministic idempotency key per committed unit of work**, derived from the
+  unit's canonical identity `(jobID, shard, range)` — the same attempt-,
+  worker-, and generation-**independent** identity that makes `FinalResultKey`
+  idempotent. Every re-execution of the same logical work (an at-least-once retry,
+  a work-stealing rebalance, a failover re-dispatch) derives the *identical* key,
+  which is exactly the handle a downstream needs to collapse the redundant
+  deliveries such re-execution produces.
+- **Propagated into untrusted algorithm code** as `PETABYTE_IDEMPOTENCY_KEY`
+  (`sandbox.RunnerSpec.IdempotencyKey`), so an algorithm that mutates a downstream
+  can stamp its writes (an idempotency-key header, a dedup column) and have *those*
+  side effects dedup too — the general case the platform cannot otherwise reach.
+- **Enforced for the effects the platform itself mediates** by a `SideEffect`
+  fired after the commit is agreed and before the WAL mark (so delivery is
+  at-least-once), fronted by an idempotency **ledger** (`internal/effect`, an
+  atomic claim-once barrier). The reference wiring
+  (`coordinator.EnableSideEffects`) emits an exactly-once task-completion event;
+  the same barrier stands in for whatever the real downstream offers (a unique
+  constraint, a broker dedup window, an idempotency-key API).
+
+So the honest guarantee is layered: **output** and **commit decision** are
+exactly-once (idempotent copy + Raft); **side effects** are effectively-once for
+any receiver that honors the key the platform generates and propagates. The
+irreducible fact that survives is only *re-execution* of compute — never a
+duplicated committed output or a double-applied keyed effect.
 
 ### 3.2 Work stealing via bounded-grant leases
 

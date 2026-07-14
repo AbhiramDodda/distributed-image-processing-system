@@ -118,13 +118,28 @@ a majority — so a failover leader inherits an authoritative record of committe
 never re-dispatches one. Verified end-to-end over real gRPC with leader failover
 (`internal/consensus/raftgrpc`, `internal/coordinator/raft_test.go`).
 
-**Honest gap (sharpened, not gone):** this makes the *output* and the *commit decision*
-exactly-once, but not arbitrary *side effects*. A crash *before* the decide re-executes the
-task; its output is unaffected (idempotent copy), but real external side effects would
-repeat. That window is irreducible — it's the fundamental atomic-commit-across-two-systems
-problem (object store + log), not something more consensus can fix. Making side effects
-themselves exactly-once requires **idempotency keys** into the downstream system, which is
-exactly what the deterministic `FinalResultKey` provides for the write the platform controls.
+**Side effects made effectively-once (idempotency keys, complete).** Consensus makes the
+*output* and the *commit decision* exactly-once, but not arbitrary *side effects*: a crash
+*before* the decide re-executes the task, and while its output is unaffected (idempotent
+copy), a real algorithm's external side effects would repeat. That window is irreducible —
+the fundamental atomic-commit-across-heterogeneous-systems problem (object store + log +
+downstream), not something more consensus can fix. So rather than deliver a side effect
+*exactly* once, the platform delivers it *at-least*-once under a stable idempotency key and
+lets the receiver dedup (at-least-once + idempotent apply = **effectively-once**):
+
+- `scheduler.SideEffectKey` derives a **deterministic idempotency key** per committed unit
+  of work from its attempt-, worker-, and generation-independent identity `(job, shard,
+  range)` — every retry, rebalance, or failover re-execution derives the *same* key.
+- It is propagated into untrusted algorithm code as `PETABYTE_IDEMPOTENCY_KEY` so an
+  algorithm can stamp its own downstream writes and have those dedup too.
+- For effects the platform mediates, a post-commit `SideEffect` (fired after the decision is
+  agreed, before the WAL mark → at-least-once) runs behind an idempotency ledger
+  (`internal/effect`); the reference `coordinator.EnableSideEffects` emits an exactly-once
+  task-completion event. Tests: `internal/effect`, `internal/scheduler/sideeffect_test.go`,
+  `internal/coordinator/effect_test.go`, `internal/sandbox` env propagation.
+
+The only thing that survives re-execution is now *compute* — never a duplicated committed
+output or a double-applied keyed side effect.
 
 ### Raft-agreed commit ledger over gRPC (complete)
 

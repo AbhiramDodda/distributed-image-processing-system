@@ -23,6 +23,7 @@ type Scheduler struct {
 	store RecordStore
 	committer Committer
 	commitDecider CommitDecider
+	sideEffect SideEffect
 	leaseChunk int64
 	onJobDone func(jobID string)
 	log *slog.Logger
@@ -302,16 +303,29 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 	// decider is configured. This is the atomic, replicated commit point that
 	// upgrades the local WAL mark below: once Decide returns, the task is committed
 	// as a majority-agreed fact (no split-brain), fenced by lease generation
-	// against a stale attempt, so a failover leader never re-dispatches it. The
-	// residual, irreducible window is a crash *before* this call, which re-executes
-	// the task; the Phase 2 copy is idempotent so the output is unaffected, and
-	// true side-effect exactly-once would require idempotency keys into the
-	// downstream system (see design.md §3.1).
+	// against a stale attempt, so a failover leader never re-dispatches it.
+	decision := CommitDecision{TaskID: taskID, JobID: jobID, Generation: gen, FinalKey: finalKey}
 	if req.Error == "" && s.commitDecider != nil {
-		if _, err := s.commitDecider.Decide(ctx, CommitDecision{
-			TaskID: taskID, JobID: jobID, Generation: gen, FinalKey: finalKey,
-		}); err != nil {
+		winner, err := s.commitDecider.Decide(ctx, decision)
+		if err != nil {
 			return fmt.Errorf("commit task %s decision: %w", taskID, err)
+		}
+		decision = winner // a newer attempt may have won; fire the effect for it.
+	}
+
+	// Phase 3.5 (unlocked): fire the task's external side effect, stamped with its
+	// deterministic idempotency key. It runs only after the commit is agreed (so it
+	// never fires for a task that isn't truly committed) and before the WAL mark
+	// below, which makes delivery at-least-once: a crash here re-reports and
+	// re-delivers under the SAME key, which a key-deduping receiver collapses to a
+	// single observable effect. This is the residual exactly-once gap made safe --
+	// two heterogeneous systems can't be committed atomically, so the platform
+	// generates a stable idempotency key and delivers at-least-once instead (see
+	// design.md §3.1 and internal/effect).
+	if req.Error == "" && s.sideEffect != nil {
+		key := SideEffectKey(jobID, shard, rng)
+		if err := s.sideEffect.Apply(ctx, key, decision); err != nil {
+			return fmt.Errorf("apply task %s side effect: %w", taskID, err)
 		}
 	}
 
