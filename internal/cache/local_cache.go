@@ -8,7 +8,6 @@
 package cache
 
 import (
-	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -46,18 +45,28 @@ type Cache struct {
 	root string
 	maxBytes int64
 	curBytes int64
-	ll *list.List // front = most recently used, back = eviction candidate
-	entries map[string]*list.Element
+	policy EvictionPolicy // ordering discipline; owns which id is reclaimed next
+	objects map[string]*entry // id -> on-disk metadata for every resident object
 	inflight map[string]*call
 	hits int64
 	misses int64
 	log *slog.Logger
 }
 
+// Option customizes a Cache at construction time.
+type Option func(*Cache)
+
+// WithPolicy selects the eviction discipline (e.g. NewLRU(), NewClock()).
+// When unset the cache defaults to LRU.
+func WithPolicy(p EvictionPolicy) Option {
+	return func(c *Cache) { c.policy = p }
+}
+
 // New opens (or creates) a cache rooted at dir with the given byte budget.
 // Any objects already present under dir from a previous run are adopted, so the
-// cache survives a process restart. maxBytes must be positive.
-func New(dir string, maxBytes int64, log *slog.Logger) (*Cache, error) {
+// cache survives a process restart. maxBytes must be positive. Without a
+// WithPolicy option the eviction discipline is LRU.
+func New(dir string, maxBytes int64, log *slog.Logger, opts ...Option) (*Cache, error) {
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("cache: maxBytes must be positive, got %d", maxBytes)
 	}
@@ -67,10 +76,15 @@ func New(dir string, maxBytes int64, log *slog.Logger) (*Cache, error) {
 	c := &Cache{
 		root:     dir,
 		maxBytes: maxBytes,
-		ll:       list.New(),
-		entries:  make(map[string]*list.Element),
+		objects:  make(map[string]*entry),
 		inflight: make(map[string]*call),
 		log:      log,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	if c.policy == nil {
+		c.policy = NewLRU()
 	}
 	if err := c.adopt(); err != nil {
 		return nil, fmt.Errorf("cache: adopt existing objects: %w", err)
@@ -87,9 +101,9 @@ func New(dir string, maxBytes int64, log *slog.Logger) (*Cache, error) {
 func (c *Cache) Get(ctx context.Context, key string, fetch FetchFunc) (io.ReadCloser, error) {
 	id := idFor(key)
 	c.mu.Lock()
-	if el, ok := c.entries[id]; ok {
-		c.ll.MoveToFront(el)
-		path := el.Value.(*entry).path
+	if e, ok := c.objects[id]; ok {
+		c.policy.Access(id)
+		path := e.path
 		c.hits++
 		c.mu.Unlock()
 		f, err := os.Open(path)
@@ -183,7 +197,7 @@ func (c *Cache) Stats() Stats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return Stats{
-		Objects: c.ll.Len(),
+		Objects: len(c.objects),
 		Bytes: c.curBytes,
 		MaxBytes: c.maxBytes,
 		Hits: c.hits,

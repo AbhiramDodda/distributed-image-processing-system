@@ -7,42 +7,42 @@ import (
 	"strings"
 )
 
-// admit records a freshly stored object as most-recently-used and evicts from
-// the LRU tail until total usage is back under the byte budget. If the same id
-// was admitted before (a concurrent re-fetch), its size delta is reconciled
-// rather than double-counted. Caller must hold c.mu.
+// admit records a freshly stored object with the eviction policy and reclaims
+// objects until total usage is back under the byte budget. If the same id was
+// admitted before (a concurrent re-fetch), its size delta is reconciled rather
+// than double-counted. Caller must hold c.mu.
 func (c *Cache) admit(id, path string, size int64) {
-	if el, ok := c.entries[id]; ok {
-		e := el.Value.(*entry)
+	if e, ok := c.objects[id]; ok {
 		c.curBytes += size - e.size
 		e.size = size
 		e.path = path
-		c.ll.MoveToFront(el)
+		c.policy.Access(id)
 	} else {
-		el := c.ll.PushFront(&entry{id: id, path: path, size: size})
-		c.entries[id] = el
+		c.objects[id] = &entry{id: id, path: path, size: size}
+		c.policy.Add(id)
 		c.curBytes += size
 	}
 	c.evictLocked()
 }
 
-// evictLocked removes least-recently-used objects until usage fits the budget.
-// A single object larger than maxBytes is kept (evicting it would not help and
-// the caller still needs it); everything behind it is dropped. Caller holds mu.
+// evictLocked removes objects chosen by the eviction policy until usage fits the
+// budget. A single object larger than maxBytes is kept (evicting it would not
+// help and the caller still needs it); everything behind it is dropped. Caller
+// holds mu.
 func (c *Cache) evictLocked() {
-	for c.curBytes > c.maxBytes && c.ll.Len() > 1 {
-		back := c.ll.Back()
-		if back == nil {
+	for c.curBytes > c.maxBytes && c.policy.Len() > 1 {
+		id, ok := c.policy.Victim()
+		if !ok {
 			return
 		}
-		e := back.Value.(*entry)
-		c.ll.Remove(back)
-		delete(c.entries, e.id)
+		e := c.objects[id]
+		c.policy.Remove(id)
+		delete(c.objects, id)
 		c.curBytes -= e.size
 		if err := os.Remove(e.path); err != nil && !os.IsNotExist(err) {
-			c.log.Warn("cache: evict remove failed", "id", e.id, "err", err)
+			c.log.Warn("cache: evict remove failed", "id", id, "err", err)
 		} else {
-			c.log.Debug("cache: evicted", "id", e.id, "bytes", e.size)
+			c.log.Debug("cache: evicted", "id", id, "bytes", e.size)
 		}
 	}
 }
@@ -82,9 +82,10 @@ func (c *Cache) adopt() error {
 	for _, o := range objs {
 		// The filename is idFor(originalKey); the original key is not recoverable
 		// from disk, but the id is exactly what Get looks up, so hits still work.
+		// Adding oldest-first leaves the newest object most-recently-used under LRU.
 		id := filepath.Base(o.path)
-		el := c.ll.PushFront(&entry{id: id, path: o.path, size: o.size})
-		c.entries[id] = el
+		c.objects[id] = &entry{id: id, path: o.path, size: o.size}
+		c.policy.Add(id)
 		c.curBytes += o.size
 	}
 	c.evictLocked()
