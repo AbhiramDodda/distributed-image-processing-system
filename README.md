@@ -175,9 +175,16 @@ whole shard keeps the flat key). The whole loop is worker-driven over a `/v1/tas
 endpoint: S3 lists keys lexicographically, so the victim and the thief index into the same
 sorted offsets. Verified end-to-end (`TestCoordinator_workStealingOverHTTP`).
 
-**Remaining:** a live MinIO walkthrough that forces a visible steal on a deliberately skewed
-shard (the scheduler core and the worker loop are done and tested; the demo is the last
-mile).
+**Live demo (`scripts/steal-demo.sh`).** The mechanism is also proven end-to-end against real
+MinIO objects. The script concentrates 6,000 images into a single shard (`gen-images -shard`
+mines filenames whose hash lands in one shard), sets a small `lease_chunk`, submits a
+one-shard job, and starts one busy worker plus one idle worker. A representative run: **53
+steals** progressively tiled the shard between the two workers (first steal hands off half the
+un-granted tail, `[3200,6000)`; the victim winds down at frontier 400), and **all 6,000 images
+were processed exactly once — 3,447 by w0 and 2,553 by w1, summing to 6,000 with no gap and no
+double-processing**, which is the whole safety guarantee made observable. A new `lease_chunk`
+coordinator config knob (default 1000) tunes steal granularity; the small shards of a uniform
+dataset stay unsplittable under the default.
 
 ### Runtime concurrency diagnostics (complete)
 
@@ -699,7 +706,7 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | 6 | Per-tenant quotas + ledger, token-bucket limiter, JWT auth + RBAC, gRPC API + WatchJob, Raft HA | Complete |
 | + | Exactly-once two-phase staging commit (Raft-agreed, fenced commit decision) | Complete |
 | + | Multi-process Raft HA over a gRPC transport + replicated commit ledger | Complete |
-| + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live steal demo pending) |
+| + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live MinIO demo: `scripts/steal-demo.sh`) |
 | + | Runtime concurrency diagnostics (`internal/diag`, `/debug/diag`) | Complete |
 | + | Backpressure & admission control (`internal/admission`, load-shedding + weighted shares) | Complete |
 | + | End-to-end CLIP/LAION similarity-search demo | Planned |

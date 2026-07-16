@@ -18,6 +18,7 @@ coordinator:
   dispatch_interval: 1s
   vnodes_per_node: 150
   task_max_retries: 3
+  lease_chunk: 0                  # items granted per lease renewal (0 = default 1000); lower it to make large shards splittable sooner for work-stealing
   wal_dir: ./coordinator-wal      # empty disables WAL persistence
   checkpoint_interval: 30s
   max_in_flight_jobs: 0           # >0 caps concurrently-admitted jobs (backpressure); submissions past it get 429

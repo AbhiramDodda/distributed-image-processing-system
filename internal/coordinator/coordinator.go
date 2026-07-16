@@ -42,6 +42,9 @@ func New(cfg *config.Config, log *slog.Logger) *Coordinator {
 		log,
 	)
 	sched := scheduler.New(ring, cfg.Coordinator.TaskMaxRetries, log)
+	if cfg.Coordinator.LeaseChunk > 0 {
+		sched.SetLeaseChunk(cfg.Coordinator.LeaseChunk)
+	}
 	return &Coordinator{
 		cfg:        cfg,
 		log:        log,

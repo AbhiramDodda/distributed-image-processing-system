@@ -64,6 +64,12 @@ type CoordinatorConfig struct {
 	DispatchInterval time.Duration `yaml:"dispatch_interval"`
 	VnodesPerNode int `yaml:"vnodes_per_node"`
 	TaskMaxRetries int `yaml:"task_max_retries"`
+	// LeaseChunk is the number of shard items granted per lease renewal. It bounds
+	// how far a worker runs ahead of its last progress report, and so sets the
+	// steal granularity: a smaller chunk means a whole shard becomes splittable
+	// sooner and leaves a larger un-granted tail for an idle worker to reclaim.
+	// Zero uses the scheduler default (1000).
+	LeaseChunk int64 `yaml:"lease_chunk"`
 	WALDir string `yaml:"wal_dir"`
 	CheckpointInterval time.Duration `yaml:"checkpoint_interval"`
 	// Backpressure: global ceiling on concurrently in-flight jobs. Submissions
