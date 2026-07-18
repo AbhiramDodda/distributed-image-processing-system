@@ -12,17 +12,17 @@ import (
 type JobStatus string
 
 const (
-	JobStatusPending   JobStatus = "PENDING"
-	JobStatusRunning   JobStatus = "RUNNING"
+	JobStatusPending JobStatus = "PENDING"
+	JobStatusRunning JobStatus = "RUNNING"
 	JobStatusSucceeded JobStatus = "SUCCEEDED"
-	JobStatusFailed    JobStatus = "FAILED"
-	JobStatusStopped   JobStatus = "STOPPED"
+	JobStatusFailed JobStatus = "FAILED"
+	JobStatusStopped JobStatus = "STOPPED"
 )
 
 type SubmitRequest struct {
-	Entrypoint    string            `json:"entrypoint"`
-	RuntimeEnvJSON string           `json:"runtime_env"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	Entrypoint string `json:"entrypoint"`
+	RuntimeEnvJSON string `json:"runtime_env"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type SubmitResponse struct {
@@ -30,11 +30,11 @@ type SubmitResponse struct {
 }
 
 type JobInfo struct {
-	SubmissionID string    `json:"submission_id"`
-	Status       JobStatus `json:"status"`
-	Message      string    `json:"message,omitempty"`
-	StartTime    *int64    `json:"start_time,omitempty"`
-	EndTime      *int64    `json:"end_time,omitempty"`
+	SubmissionID string `json:"submission_id"`
+	Status JobStatus `json:"status"`
+	Message string `json:"message,omitempty"`
+	StartTime *int64 `json:"start_time,omitempty"`
+	EndTime *int64 `json:"end_time,omitempty"`
 }
 
 // SubmitJob sends a Ray job to the Dashboard API and returns the submission ID.

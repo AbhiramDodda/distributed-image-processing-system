@@ -29,7 +29,7 @@ func TestCostProjection_hotTierOnly(t *testing.T) {
 func TestCostProjection_archiveCheaperThanHot(t *testing.T) {
 	const oneGiB = 1024 * 1024 * 1024
 	out := tiering.CostProjection(map[storage.StorageTier]int64{
-		storage.TierHot:     oneGiB,
+		storage.TierHot: oneGiB,
 		storage.TierArchive: oneGiB,
 	})
 	if out[storage.TierArchive] >= out[storage.TierHot] {
@@ -40,9 +40,9 @@ func TestCostProjection_archiveCheaperThanHot(t *testing.T) {
 func TestCostProjection_petabyteScale(t *testing.T) {
 	const onePiB = 1024 * 1024 * 1024 * 1024 * 1024
 	out := tiering.CostProjection(map[storage.StorageTier]int64{
-		storage.TierHot:     onePiB,
-		storage.TierWarm:    onePiB,
-		storage.TierCold:    onePiB,
+		storage.TierHot: onePiB,
+		storage.TierWarm: onePiB,
+		storage.TierCold: onePiB,
 		storage.TierArchive: onePiB,
 	})
 	// Verify all four tiers produce a positive cost

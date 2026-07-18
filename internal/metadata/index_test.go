@@ -24,16 +24,16 @@ func openTestIndex(t *testing.T) *metadata.Index {
 
 func makeRecord(id, filename, shard, dataset string, tier storage.StorageTier, age time.Duration) metadata.DataRecord {
 	return metadata.DataRecord{
-		ID:        id,
-		Filename:  filename,
-		S3Key:     dataset + "/" + shard + "/" + filename,
-		Shard:     shard,
-		Dataset:   dataset,
+		ID: id,
+		Filename: filename,
+		S3Key: dataset + "/" + shard + "/" + filename,
+		Shard: shard,
+		Dataset: dataset,
 		SizeBytes: 1024,
-		Checksum:  "abc123",
-		Labels:    []string{"cat", "animal"},
-		Meta:      map[string]string{"width": "224"},
-		Tier:      tier,
+		Checksum: "abc123",
+		Labels: []string{"cat", "animal"},
+		Meta: map[string]string{"width": "224"},
+		Tier: tier,
 		IndexedAt: time.Now().Add(-age),
 	}
 }

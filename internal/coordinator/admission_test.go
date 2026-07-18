@@ -21,8 +21,8 @@ func newAdmissionServer(t *testing.T) *httptest.Server {
 	cfg := &config.Config{
 		Coordinator: config.CoordinatorConfig{
 			SuspectTimeout: 10 * time.Second,
-			DeadTimeout:    20 * time.Second,
-			VnodesPerNode:  50,
+			DeadTimeout: 20 * time.Second,
+			VnodesPerNode: 50,
 			TaskMaxRetries: 2,
 		},
 	}

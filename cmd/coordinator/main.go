@@ -81,12 +81,12 @@ func main() {
 	// Leaving the bucket empty runs the coordinator storage-free (at-least-once).
 	if cfg.Storage.Bucket != "" {
 		store, err := storage.NewClient(context.Background(), storage.ClientConfig{
-			Endpoint:        cfg.Storage.Endpoint,
-			Region:          cfg.Storage.Region,
-			Bucket:          cfg.Storage.Bucket,
-			AccessKeyID:     cfg.Storage.AccessKeyID,
+			Endpoint: cfg.Storage.Endpoint,
+			Region: cfg.Storage.Region,
+			Bucket: cfg.Storage.Bucket,
+			AccessKeyID: cfg.Storage.AccessKeyID,
 			SecretAccessKey: cfg.Storage.SecretAccessKey,
-			UsePathStyle:    cfg.Storage.UsePathStyle,
+			UsePathStyle: cfg.Storage.UsePathStyle,
 		})
 		if err != nil {
 			log.Error("init storage", "err", err)
@@ -114,11 +114,11 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Coordinator.Host, cfg.Coordinator.Port)
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
+		Addr: addr,
+		Handler: mux,
+		ReadTimeout: 30 * time.Second,
 		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		IdleTimeout: 120 * time.Second,
 	}
 
 	grpcSrv, err := startGRPC(cfg, coord, log)

@@ -23,7 +23,7 @@ func TestScheduler_concurrentPoll_noDoubleAssignment(t *testing.T) {
 
 	// 256 shards = 256 tasks, one per shard
 	job, _ := s.Submit(scheduler.SubmitJobRequest{
-		Dataset:   "train",
+		Dataset: "train",
 		Algorithm: "resnet",
 	})
 	if job.TotalTasks != 256 {
@@ -101,7 +101,7 @@ func TestScheduler_concurrentLifecycle(t *testing.T) {
 					t.Errorf("StartTask: %v", err)
 				}
 				if err := s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
-					WorkerID:        workerID,
+					WorkerID: workerID,
 					ImagesProcessed: 10,
 				}); err != nil {
 					t.Errorf("ReportResult: %v", err)

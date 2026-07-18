@@ -74,11 +74,11 @@ func New(dir string, maxBytes int64, log *slog.Logger, opts ...Option) (*Cache, 
 		return nil, fmt.Errorf("cache: create root %s: %w", dir, err)
 	}
 	c := &Cache{
-		root:     dir,
+		root: dir,
 		maxBytes: maxBytes,
-		objects:  make(map[string]*entry),
+		objects: make(map[string]*entry),
 		inflight: make(map[string]*call),
-		log:      log,
+		log: log,
 	}
 	for _, opt := range opts {
 		opt(c)

@@ -57,12 +57,12 @@ func run(log *slog.Logger, configPath, index string, k int, id, vector, text, im
 	var store vsearch.ObjectGetter
 	if cfg, err := config.Load(configPath); err == nil {
 		if sc, err := storage.NewClient(ctx, storage.ClientConfig{
-			Endpoint:        cfg.Storage.Endpoint,
-			Region:          cfg.Storage.Region,
-			Bucket:          cfg.Storage.Bucket,
-			AccessKeyID:     cfg.Storage.AccessKeyID,
+			Endpoint: cfg.Storage.Endpoint,
+			Region: cfg.Storage.Region,
+			Bucket: cfg.Storage.Bucket,
+			AccessKeyID: cfg.Storage.AccessKeyID,
 			SecretAccessKey: cfg.Storage.SecretAccessKey,
-			UsePathStyle:    cfg.Storage.UsePathStyle,
+			UsePathStyle: cfg.Storage.UsePathStyle,
 		}); err == nil {
 			store = sc
 		}

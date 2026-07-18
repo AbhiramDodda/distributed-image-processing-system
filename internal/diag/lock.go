@@ -16,11 +16,11 @@ import (
 // Give it a name with SetName so its stats and any lock-order warning are
 // legible; an unnamed lock is reported as "?".
 type Mutex struct {
-	mu     sync.Mutex
-	name   string
-	st     atomic.Pointer[lockStat]
+	mu sync.Mutex
+	name string
+	st atomic.Pointer[lockStat]
 	holder atomic.Int64 // goid of current holder, 0 = free
-	acqAt  atomic.Int64 // unixnano when the current holder acquired it
+	acqAt atomic.Int64 // unixnano when the current holder acquired it
 }
 
 // RWMutex is the read/write analogue of Mutex. The write path (Lock/Unlock) is
@@ -28,16 +28,16 @@ type Mutex struct {
 // records wait and hold and participates in order tracking, but many readers may
 // hold it at once, so it reports no single "holder".
 type RWMutex struct {
-	mu       sync.RWMutex
-	name     string
-	st       atomic.Pointer[lockStat]
-	wHolder  atomic.Int64
-	wAcqAt   atomic.Int64
-	rHoldAt  sync.Map // goid -> unixnano acquire time, for per-reader hold timing
+	mu sync.RWMutex
+	name string
+	st atomic.Pointer[lockStat]
+	wHolder atomic.Int64
+	wAcqAt atomic.Int64
+	rHoldAt sync.Map // goid -> unixnano acquire time, for per-reader hold timing
 }
 
 // SetName labels the lock. Call once before first use (e.g. in a constructor).
-func (m *Mutex) SetName(n string)   { m.name = n }
+func (m *Mutex) SetName(n string) { m.name = n }
 func (m *RWMutex) SetName(n string) { m.name = n }
 
 func (m *Mutex) Lock() {
@@ -137,20 +137,20 @@ func (m *RWMutex) RUnlock() {
 // ---- per-lock statistics -------------------------------------------------
 
 type lockStat struct {
-	name         string
+	name string
 	acquisitions atomic.Int64
-	waitTotal    atomic.Int64 // nanoseconds
-	holdTotal    atomic.Int64 // nanoseconds
-	maxWait      atomic.Int64
-	maxHold      atomic.Int64
-	contended    atomic.Int64 // acquisitions whose wait exceeded WaitWarn
-	longHolds    atomic.Int64 // holds exceeding HoldWarn
+	waitTotal atomic.Int64 // nanoseconds
+	holdTotal atomic.Int64 // nanoseconds
+	maxWait atomic.Int64
+	maxHold atomic.Int64
+	contended atomic.Int64 // acquisitions whose wait exceeded WaitWarn
+	longHolds atomic.Int64 // holds exceeding HoldWarn
 }
 
 // registry holds every named lock's stats so the endpoint can enumerate them.
 var (
 	registryMu sync.Mutex
-	registry   = map[string]*lockStat{}
+	registry = map[string]*lockStat{}
 )
 
 // statFor returns the lock's stat, lazily creating and registering it. Cached in
@@ -206,14 +206,14 @@ func storeMax(dst *atomic.Int64, v int64) {
 
 // LockStat is the exported snapshot of one lock's counters.
 type LockStat struct {
-	Name         string `json:"name"`
-	Acquisitions int64  `json:"acquisitions"`
-	WaitAvgNanos int64  `json:"wait_avg_nanos"`
-	WaitMaxNanos int64  `json:"wait_max_nanos"`
-	HoldAvgNanos int64  `json:"hold_avg_nanos"`
-	HoldMaxNanos int64  `json:"hold_max_nanos"`
-	Contended    int64  `json:"contended"`
-	LongHolds    int64  `json:"long_holds"`
+	Name string `json:"name"`
+	Acquisitions int64 `json:"acquisitions"`
+	WaitAvgNanos int64 `json:"wait_avg_nanos"`
+	WaitMaxNanos int64 `json:"wait_max_nanos"`
+	HoldAvgNanos int64 `json:"hold_avg_nanos"`
+	HoldMaxNanos int64 `json:"hold_max_nanos"`
+	Contended int64 `json:"contended"`
+	LongHolds int64 `json:"long_holds"`
 }
 
 // LockStats returns a snapshot of every named lock, sorted by name.
@@ -237,14 +237,14 @@ func LockStats() []LockStat {
 			holdAvg = s.holdTotal.Load() / acq
 		}
 		out = append(out, LockStat{
-			Name:         n,
+			Name: n,
 			Acquisitions: acq,
 			WaitAvgNanos: waitAvg,
 			WaitMaxNanos: s.maxWait.Load(),
 			HoldAvgNanos: holdAvg,
 			HoldMaxNanos: s.maxHold.Load(),
-			Contended:    s.contended.Load(),
-			LongHolds:    s.longHolds.Load(),
+			Contended: s.contended.Load(),
+			LongHolds: s.longHolds.Load(),
 		})
 	}
 	return out
@@ -259,10 +259,10 @@ func LockStats() []LockStat {
 // already reach X), the orders are inconsistent and we warn once for that pair.
 
 var (
-	graphMu   sync.Mutex
-	heldByG   = map[int64][]string{}         // goroutine -> stack of held lock names
-	edges     = map[string]map[string]bool{} // from -> set(to)
-	reported  = map[string]bool{}            // "a|b" pairs already warned about
+	graphMu sync.Mutex
+	heldByG = map[int64][]string{} // goroutine -> stack of held lock names
+	edges = map[string]map[string]bool{} // from -> set(to)
+	reported = map[string]bool{} // "a|b" pairs already warned about
 )
 
 // enterAcquire is called just before a goroutine blocks to acquire `name` while

@@ -11,23 +11,23 @@ import (
 // Client wraps the Ray Dashboard REST API.
 type Client struct {
 	dashboardURL string
-	httpClient   *http.Client
+	httpClient *http.Client
 }
 
 func NewClient(dashboardURL string) *Client {
 	return &Client{
 		dashboardURL: dashboardURL,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 type ClusterInfo struct {
-	NodeCount      int    `json:"node_count"`
-	CPUCount       int    `json:"cpu_count"`
-	GPUCount       int    `json:"gpu_count"`
-	RAMBytes       int64  `json:"ram_bytes"`
-	RayVersion     string `json:"ray_version"`
-	PythonVersion  string `json:"python_version"`
+	NodeCount int `json:"node_count"`
+	CPUCount int `json:"cpu_count"`
+	GPUCount int `json:"gpu_count"`
+	RAMBytes int64 `json:"ram_bytes"`
+	RayVersion string `json:"ray_version"`
+	PythonVersion string `json:"python_version"`
 }
 
 // HealthCheck confirms the Ray Dashboard API is reachable and returns

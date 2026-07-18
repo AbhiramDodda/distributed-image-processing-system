@@ -32,9 +32,9 @@ func AllShards() []string {
 type StorageTier string
 
 const (
-	TierHot     StorageTier = "HOT"
-	TierWarm    StorageTier = "WARM"
-	TierCold    StorageTier = "COLD"
+	TierHot StorageTier = "HOT"
+	TierWarm StorageTier = "WARM"
+	TierCold StorageTier = "COLD"
 	TierArchive StorageTier = "ARCHIVE"
 )
 

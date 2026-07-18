@@ -26,12 +26,12 @@ type Membership struct {
 
 func NewMembership(ring *Ring, suspectTimeout, deadTimeout time.Duration, log *slog.Logger) *Membership {
 	return &Membership{
-		nodes:          make(map[string]*NodeInfo),
-		ring:           ring,
+		nodes: make(map[string]*NodeInfo),
+		ring: ring,
 		suspectTimeout: suspectTimeout,
-		deadTimeout:    deadTimeout,
-		events:         make(chan FailureEvent, 128),
-		log:            log,
+		deadTimeout: deadTimeout,
+		events: make(chan FailureEvent, 128),
+		log: log,
 	}
 }
 
@@ -44,9 +44,9 @@ func (m *Membership) Register(req RegisterRequest) error {
 		return nil
 	}
 	m.nodes[req.ID] = &NodeInfo{
-		ID:       req.ID,
-		Address:  req.Address,
-		State:    NodeActive,
+		ID: req.ID,
+		Address: req.Address,
+		State: NodeActive,
 		LastSeen: time.Now(),
 		JoinedAt: time.Now(),
 	}

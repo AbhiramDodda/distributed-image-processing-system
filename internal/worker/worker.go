@@ -37,18 +37,18 @@ func New(cfg *config.Config, store *storage.Client, log *slog.Logger) *Worker {
 		id = uuid.New().String()
 	}
 	return &Worker{
-		id:          id,
-		cfg:         cfg,
-		log:         log,
-		store:       store,
+		id: id,
+		cfg: cfg,
+		log: log,
+		store: store,
 		coordinator: cfg.Worker.CoordinatorURL,
-		sem:         make(chan struct{}, cfg.Worker.Concurrency),
+		sem: make(chan struct{}, cfg.Worker.Concurrency),
 		activeTasks: make(map[string]*scheduler.Task),
-		stopCh:      make(chan struct{}),
+		stopCh: make(chan struct{}),
 	}
 }
 
-func (w *Worker) ID() string      { return w.id }
+func (w *Worker) ID() string { return w.id }
 func (w *Worker) Address() string { return fmt.Sprintf("%s:%d", w.cfg.Worker.Host, w.cfg.Worker.Port) }
 
 func (w *Worker) Start(ctx context.Context) error {
@@ -71,7 +71,7 @@ func (w *Worker) ActiveTaskCount() int {
 
 func (w *Worker) register() error {
 	return postJSON(w.coordinator+"/v1/cluster/register", cluster.RegisterRequest{
-		ID:      w.id,
+		ID: w.id,
 		Address: w.Address(),
 	})
 }
@@ -147,11 +147,11 @@ func (w *Worker) executeTask(ctx context.Context, a scheduler.TaskAssignment) {
 	processed, bytesRead, outputKey, execErr := w.runAlgorithm(ctx, a)
 
 	req := scheduler.ResultRequest{
-		WorkerID:        w.id,
+		WorkerID: w.id,
 		ImagesProcessed: processed,
-		BytesRead:       bytesRead,
-		OutputKey:       outputKey,
-		Duration:        time.Since(start),
+		BytesRead: bytesRead,
+		OutputKey: outputKey,
+		Duration: time.Since(start),
 	}
 	if execErr != nil {
 		req.Error = execErr.Error()
@@ -173,11 +173,11 @@ func (w *Worker) RunTask(ctx context.Context, a scheduler.TaskAssignment) error 
 	start := time.Now()
 	processed, bytesRead, outputKey, execErr := w.runAlgorithm(ctx, a)
 	req := scheduler.ResultRequest{
-		WorkerID:        w.id,
+		WorkerID: w.id,
 		ImagesProcessed: processed,
-		BytesRead:       bytesRead,
-		OutputKey:       outputKey,
-		Duration:        time.Since(start),
+		BytesRead: bytesRead,
+		OutputKey: outputKey,
+		Duration: time.Since(start),
 	}
 	if execErr != nil {
 		req.Error = execErr.Error()
@@ -228,10 +228,10 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 		// stop cooperatively rather than running past what we're leased to touch.
 		if i >= bound {
 			renewal, err := w.renew(a.TaskID, scheduler.RenewLeaseRequest{
-				WorkerID:   w.id,
+				WorkerID: w.id,
 				Generation: gen,
-				Frontier:   i,
-				Total:      total,
+				Frontier: i,
+				Total: total,
 			})
 			if err != nil {
 				w.log.Warn("renew lease failed", "task_id", a.TaskID, "err", err)
@@ -260,12 +260,12 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 
 	stagingKey := scheduler.StagingResultKey(a.JobID, a.TaskID)
 	result := scheduler.TaskResult{
-		TaskID:          a.TaskID,
-		JobID:           a.JobID,
-		WorkerID:        w.id,
+		TaskID: a.TaskID,
+		JobID: a.JobID,
+		WorkerID: w.id,
 		ImagesProcessed: processed,
-		BytesRead:       totalBytes,
-		OutputKey:       scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split}),
+		BytesRead: totalBytes,
+		OutputKey: scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split}),
 	}
 	body, err := json.Marshal(result)
 	if err != nil {

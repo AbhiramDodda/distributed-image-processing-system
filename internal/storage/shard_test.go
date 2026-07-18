@@ -86,7 +86,7 @@ func TestObjectKey_structure(t *testing.T) {
 
 func TestStorageTier_S3StorageClass(t *testing.T) {
 	cases := []struct {
-		tier  storage.StorageTier
+		tier storage.StorageTier
 		class string
 	}{
 		{storage.TierHot, "STANDARD"},

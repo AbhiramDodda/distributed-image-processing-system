@@ -69,8 +69,8 @@ func New(cfg Config) *Controller {
 		cfg.MaxInFlight = 1
 	}
 	return &Controller{
-		cfg:      cfg,
-		classes:  make(map[string]Class),
+		cfg: cfg,
+		classes: make(map[string]Class),
 		inflight: make(map[string]int),
 	}
 }
@@ -179,9 +179,9 @@ func (c *Controller) Stats() Stats {
 	}
 	return Stats{
 		MaxInFlight: c.cfg.MaxInFlight,
-		InFlight:    c.total,
-		Admitted:    c.admitted,
-		Rejected:    c.rejected,
-		PerTenant:   per,
+		InFlight: c.total,
+		Admitted: c.admitted,
+		Rejected: c.rejected,
+		PerTenant: per,
 	}
 }

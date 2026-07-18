@@ -11,20 +11,20 @@ import (
 // because state that "can't happen" happened. Kept in a bounded ring so the
 // /debug/diag endpoint can show the most recent ones without unbounded growth.
 type Violation struct {
-	Time    time.Time `json:"time"`
-	Msg     string    `json:"msg"`
-	Detail  string    `json:"detail"`
-	Goid    int64     `json:"goid"`
-	Stack   string    `json:"stack"`
+	Time time.Time `json:"time"`
+	Msg string `json:"msg"`
+	Detail string `json:"detail"`
+	Goid int64 `json:"goid"`
+	Stack string `json:"stack"`
 }
 
 const maxViolations = 128
 
 var (
 	violCount atomic.Int64
-	violMu    sync.Mutex
-	violRing  [maxViolations]Violation
-	violNext  int // next write index into the ring
+	violMu sync.Mutex
+	violRing [maxViolations]Violation
+	violNext int // next write index into the ring
 )
 
 // Assert checks a runtime invariant. When diagnostics are on and cond is false,
@@ -53,11 +53,11 @@ func Assertf(cond bool, msg, format string, args ...any) {
 
 func record(msg, detail string) {
 	v := Violation{
-		Time:   clock(),
-		Msg:    msg,
+		Time: clock(),
+		Msg: msg,
 		Detail: detail,
-		Goid:   goid(),
-		Stack:  shortStack(2),
+		Goid: goid(),
+		Stack: shortStack(2),
 	}
 	violCount.Add(1)
 	violMu.Lock()

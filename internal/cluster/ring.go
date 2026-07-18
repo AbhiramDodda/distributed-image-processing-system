@@ -30,7 +30,7 @@ func NewRing(vnodesPerNode int) *Ring {
 		vnodesPerNode = DefaultVnodesPerNode
 	}
 	return &Ring{
-		nodes:     make(map[string]struct{}),
+		nodes: make(map[string]struct{}),
 		vnodesPer: vnodesPerNode,
 	}
 }

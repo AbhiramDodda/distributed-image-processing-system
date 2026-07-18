@@ -49,8 +49,8 @@ func (e *Engine) Run(ctx context.Context) (*Report, error) {
 			return report, fmt.Errorf("transition %s->%s: %w", t.from, t.to, err)
 		}
 		report.Transitions = append(report.Transitions, TransitionResult{
-			From:  t.from,
-			To:    t.to,
+			From: t.from,
+			To: t.to,
 			Count: n,
 			Bytes: bytes,
 		})
@@ -101,9 +101,9 @@ type Report struct {
 // Prices are approximate US-East-1 rates per GB/month (2024).
 func CostProjection(stats map[storage.StorageTier]int64) map[storage.StorageTier]float64 {
 	pricePerGB := map[storage.StorageTier]float64{
-		storage.TierHot:     0.023,
-		storage.TierWarm:    0.0125,
-		storage.TierCold:    0.004,
+		storage.TierHot: 0.023,
+		storage.TierWarm: 0.0125,
+		storage.TierCold: 0.004,
 		storage.TierArchive: 0.00099,
 	}
 	out := make(map[storage.StorageTier]float64)

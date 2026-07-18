@@ -20,8 +20,8 @@ func (a *API) Register(mux *http.ServeMux) {
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":       "ok",
-		"worker_id":    a.w.ID(),
+		"status": "ok",
+		"worker_id": a.w.ID(),
 		"active_tasks": a.w.ActiveTaskCount(),
 	})
 }

@@ -46,12 +46,12 @@ func New(cfg *config.Config, log *slog.Logger) *Coordinator {
 		sched.SetLeaseChunk(cfg.Coordinator.LeaseChunk)
 	}
 	return &Coordinator{
-		cfg:        cfg,
-		log:        log,
-		ring:       ring,
+		cfg: cfg,
+		log: log,
+		ring: ring,
 		membership: mem,
-		sched:      sched,
-		stopCh:     make(chan struct{}),
+		sched: sched,
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -185,9 +185,9 @@ func (c *Coordinator) checkpoint() error {
 	return c.wal.Checkpoint(snap)
 }
 
-func (c *Coordinator) Membership() *cluster.Membership  { return c.membership }
-func (c *Coordinator) Ring() *cluster.Ring              { return c.ring }
-func (c *Coordinator) Scheduler() *scheduler.Scheduler  { return c.sched }
+func (c *Coordinator) Membership() *cluster.Membership { return c.membership }
+func (c *Coordinator) Ring() *cluster.Ring { return c.ring }
+func (c *Coordinator) Scheduler() *scheduler.Scheduler { return c.sched }
 
 func (c *Coordinator) tickLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)

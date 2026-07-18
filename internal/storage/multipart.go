@@ -17,7 +17,7 @@ import (
 func (c *Client) MultipartUpload(ctx context.Context, key string, r io.Reader, chunkSize int64, concurrency int) error {
 	create, err := c.s3.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key: aws.String(key),
 	})
 	if err != nil {
 		return fmt.Errorf("create multipart upload: %w", err)
@@ -26,8 +26,8 @@ func (c *Client) MultipartUpload(ctx context.Context, key string, r io.Reader, c
 
 	abort := func() {
 		c.s3.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
-			Bucket:   aws.String(c.bucket),
-			Key:      aws.String(key),
+			Bucket: aws.String(c.bucket),
+			Key: aws.String(key),
 			UploadId: aws.String(uploadID),
 		})
 	}
@@ -52,11 +52,11 @@ func (c *Client) MultipartUpload(ctx context.Context, key string, r io.Reader, c
 			defer wg.Done()
 			for w := range workCh {
 				out, err := c.s3.UploadPart(ctx, &s3.UploadPartInput{
-					Bucket:     aws.String(c.bucket),
-					Key:        aws.String(key),
-					UploadId:   aws.String(uploadID),
+					Bucket: aws.String(c.bucket),
+					Key: aws.String(key),
+					UploadId: aws.String(uploadID),
 					PartNumber: aws.Int32(w.num),
-					Body:       newBytesReader(w.data),
+					Body: newBytesReader(w.data),
 				})
 				if err != nil {
 					errCh <- fmt.Errorf("upload part %d: %w", w.num, err)
@@ -110,13 +110,13 @@ func (c *Client) MultipartUpload(ctx context.Context, key string, r io.Reader, c
 	for i, p := range parts {
 		completed[i] = s3types.CompletedPart{
 			PartNumber: aws.Int32(p.num),
-			ETag:       aws.String(p.etag),
+			ETag: aws.String(p.etag),
 		}
 	}
 
 	_, err = c.s3.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-		Bucket:   aws.String(c.bucket),
-		Key:      aws.String(key),
+		Bucket: aws.String(c.bucket),
+		Key: aws.String(key),
 		UploadId: aws.String(uploadID),
 		MultipartUpload: &s3types.CompletedMultipartUpload{
 			Parts: completed,

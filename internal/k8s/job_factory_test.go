@@ -13,12 +13,12 @@ import (
 
 func taskAssignment() scheduler.TaskAssignment {
 	return scheduler.TaskAssignment{
-		TaskID:    "550e8400-e29b-41d4-a716-446655440000",
-		JobID:     "job-abc-123",
-		Shard:     "a3",
-		Dataset:   "train",
+		TaskID: "550e8400-e29b-41d4-a716-446655440000",
+		JobID: "job-abc-123",
+		Shard: "a3",
+		Dataset: "train",
 		Algorithm: "resnet",
-		Config:    map[string]string{"batch_size": "32"},
+		Config: map[string]string{"batch_size": "32"},
 	}
 }
 

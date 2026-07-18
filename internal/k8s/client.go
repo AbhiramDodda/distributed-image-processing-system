@@ -12,14 +12,14 @@ import (
 
 const (
 	inClusterTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	inClusterCAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	inClusterCAPath = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 )
 
 type Client struct {
-	apiserver  string
-	token      string
+	apiserver string
+	token string
 	httpClient *http.Client
-	namespace  string
+	namespace string
 }
 
 func NewClient(namespace, kubeconfigPath string) (*Client, error) {
@@ -52,7 +52,7 @@ func fromInCluster(namespace string) (*Client, error) {
 	}
 	return &Client{
 		apiserver: fmt.Sprintf("https://%s:%s", host, port),
-		token:     string(token),
+		token: string(token),
 		namespace: namespace,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
@@ -69,16 +69,16 @@ func fromEnv(namespace string) (*Client, error) {
 		return nil, fmt.Errorf("not in-cluster and KUBE_APISERVER not set")
 	}
 	return &Client{
-		apiserver:  apiserver,
-		token:      token,
-		namespace:  namespace,
+		apiserver: apiserver,
+		token: token,
+		namespace: namespace,
 		httpClient: &http.Client{},
 	}, nil
 }
 
 type kubeconfig struct {
 	Clusters []struct {
-		Name    string `yaml:"name"`
+		Name string `yaml:"name"`
 		Cluster struct {
 			Server string `yaml:"server"`
 			CAData string `yaml:"certificate-authority-data"`
@@ -87,16 +87,16 @@ type kubeconfig struct {
 	Users []struct {
 		Name string `yaml:"name"`
 		User struct {
-			Token      string `yaml:"token"`
+			Token string `yaml:"token"`
 			ClientCert string `yaml:"client-certificate-data"`
-			ClientKey  string `yaml:"client-key-data"`
+			ClientKey string `yaml:"client-key-data"`
 		} `yaml:"user"`
 	} `yaml:"users"`
 	Contexts []struct {
-		Name    string `yaml:"name"`
+		Name string `yaml:"name"`
 		Context struct {
 			Cluster string `yaml:"cluster"`
-			User    string `yaml:"user"`
+			User string `yaml:"user"`
 		} `yaml:"context"`
 	} `yaml:"contexts"`
 	CurrentContext string `yaml:"current-context"`
@@ -137,9 +137,9 @@ func fromKubeconfig(namespace, path string) (*Client, error) {
 		return nil, fmt.Errorf("kubeconfig: no server found for context %q", kc.CurrentContext)
 	}
 	return &Client{
-		apiserver:  server,
-		token:      token,
-		namespace:  namespace,
+		apiserver: server,
+		token: token,
+		namespace: namespace,
 		httpClient: &http.Client{},
 	}, nil
 }

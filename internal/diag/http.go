@@ -8,24 +8,24 @@ import (
 
 // Snapshot is the full diagnostics report served at /debug/diag.
 type Snapshot struct {
-	Enabled         bool               `json:"enabled"`
-	NumGoroutines   int                `json:"num_goroutines"`
-	ViolationCount  int64              `json:"violation_count"`
-	Violations      []Violation        `json:"violations"`
-	Locks           []LockStat         `json:"locks"`
+	Enabled bool `json:"enabled"`
+	NumGoroutines int `json:"num_goroutines"`
+	ViolationCount int64 `json:"violation_count"`
+	Violations []Violation `json:"violations"`
+	Locks []LockStat `json:"locks"`
 	LockOrderIssues []LockOrderWarning `json:"lock_order_issues"`
-	GoroutineDump   string             `json:"goroutine_dump,omitempty"`
+	GoroutineDump string `json:"goroutine_dump,omitempty"`
 }
 
 // Report builds the current diagnostics snapshot. Pass withStacks to include a
 // full goroutine dump (useful when chasing a hang; larger payload).
 func Report(withStacks bool) Snapshot {
 	s := Snapshot{
-		Enabled:         Enabled(),
-		NumGoroutines:   runtime.NumGoroutine(),
-		ViolationCount:  ViolationCount(),
-		Violations:      RecentViolations(),
-		Locks:           LockStats(),
+		Enabled: Enabled(),
+		NumGoroutines: runtime.NumGoroutine(),
+		ViolationCount: ViolationCount(),
+		Violations: RecentViolations(),
+		Locks: LockStats(),
 		LockOrderIssues: LockOrderWarnings(),
 	}
 	if withStacks {

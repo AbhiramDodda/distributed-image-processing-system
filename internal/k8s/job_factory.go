@@ -16,42 +16,42 @@ import (
 // Minimal K8s batch/v1 Job types — avoids pulling in the full k8s.io/api tree.
 
 type jobMeta struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Labels    map[string]string `json:"labels,omitempty"`
+	Name string `json:"name"`
+	Namespace string `json:"namespace"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 type envVar struct {
-	Name  string `json:"name"`
+	Name string `json:"name"`
 	Value string `json:"value"`
 }
 
 type resourceList struct {
-	CPU    string `json:"cpu,omitempty"`
+	CPU string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
-	GPU    string `json:"nvidia.com/gpu,omitempty"`
+	GPU string `json:"nvidia.com/gpu,omitempty"`
 }
 
 type resources struct {
 	Requests resourceList `json:"requests,omitempty"`
-	Limits   resourceList `json:"limits,omitempty"`
+	Limits resourceList `json:"limits,omitempty"`
 }
 
 type container struct {
-	Name      string    `json:"name"`
-	Image     string    `json:"image"`
-	Command   []string  `json:"command,omitempty"`
-	Env       []envVar  `json:"env"`
+	Name string `json:"name"`
+	Image string `json:"image"`
+	Command []string `json:"command,omitempty"`
+	Env []envVar `json:"env"`
 	Resources resources `json:"resources"`
 }
 
 type preferredSchedulingTerm struct {
-	Weight     int32 `json:"weight"`
+	Weight int32 `json:"weight"`
 	Preference struct {
 		MatchExpressions []struct {
-			Key      string   `json:"key"`
-			Operator string   `json:"operator"`
-			Values   []string `json:"values"`
+			Key string `json:"key"`
+			Operator string `json:"operator"`
+			Values []string `json:"values"`
 		} `json:"matchExpressions"`
 	} `json:"preference"`
 }
@@ -65,26 +65,26 @@ type affinity struct {
 }
 
 type podSpec struct {
-	RestartPolicy string      `json:"restartPolicy"`
-	Containers    []container `json:"containers"`
-	Affinity      *affinity   `json:"affinity,omitempty"`
+	RestartPolicy string `json:"restartPolicy"`
+	Containers []container `json:"containers"`
+	Affinity *affinity `json:"affinity,omitempty"`
 }
 
 type podTemplateSpec struct {
 	Metadata jobMeta `json:"metadata"`
-	Spec     podSpec `json:"spec"`
+	Spec podSpec `json:"spec"`
 }
 
 type batchJobSpec struct {
-	BackoffLimit int32           `json:"backoffLimit"`
-	Template     podTemplateSpec `json:"template"`
+	BackoffLimit int32 `json:"backoffLimit"`
+	Template podTemplateSpec `json:"template"`
 }
 
 type batchJob struct {
-	APIVersion string       `json:"apiVersion"`
-	Kind       string       `json:"kind"`
-	Metadata   jobMeta      `json:"metadata"`
-	Spec       batchJobSpec `json:"spec"`
+	APIVersion string `json:"apiVersion"`
+	Kind string `json:"kind"`
+	Metadata jobMeta `json:"metadata"`
+	Spec batchJobSpec `json:"spec"`
 }
 
 // JobName returns the K8s Job name for a task. K8s names must be ≤63 chars,
@@ -123,7 +123,7 @@ func BuildJob(a scheduler.TaskAssignment, image, coordinatorURL string, nodes []
 
 	res := resources{
 		Requests: resourceList{CPU: cpu, Memory: mem},
-		Limits:   resourceList{CPU: cpu, Memory: mem},
+		Limits: resourceList{CPU: cpu, Memory: mem},
 	}
 	if gpu != "" {
 		res.Requests.GPU = gpu
@@ -131,17 +131,17 @@ func BuildJob(a scheduler.TaskAssignment, image, coordinatorURL string, nodes []
 	}
 
 	labels := map[string]string{
-		"app":     "petabyte-worker",
+		"app": "petabyte-worker",
 		"task-id": a.TaskID,
-		"job-id":  a.JobID,
-		"shard":   a.Shard,
+		"job-id": a.JobID,
+		"shard": a.Shard,
 	}
 
 	job := &batchJob{
 		APIVersion: "batch/v1",
-		Kind:       "Job",
+		Kind: "Job",
 		Metadata: jobMeta{
-			Name:   JobName(a.TaskID),
+			Name: JobName(a.TaskID),
 			Labels: labels,
 		},
 		Spec: batchJobSpec{
@@ -152,10 +152,10 @@ func BuildJob(a scheduler.TaskAssignment, image, coordinatorURL string, nodes []
 					RestartPolicy: "Never",
 					Containers: []container{
 						{
-							Name:      "worker",
-							Image:     image,
-							Command:   []string{"/worker", "-single-task"},
-							Env:       []envVar{
+							Name: "worker",
+							Image: image,
+							Command: []string{"/worker", "-single-task"},
+							Env: []envVar{
 								{Name: "PETABYTE_TASK_JSON", Value: encoded},
 								{Name: "PETABYTE_COORDINATOR_URL", Value: coordinatorURL},
 							},
@@ -191,9 +191,9 @@ func buildAffinity(shard string, nodes []*cluster.NodeInfo) *affinity {
 	}
 	term := preferredSchedulingTerm{Weight: 100}
 	term.Preference.MatchExpressions = []struct {
-		Key      string   `json:"key"`
-		Operator string   `json:"operator"`
-		Values   []string `json:"values"`
+		Key string `json:"key"`
+		Operator string `json:"operator"`
+		Values []string `json:"values"`
 	}{
 		{Key: "kubernetes.io/hostname", Operator: "In", Values: preferred},
 	}

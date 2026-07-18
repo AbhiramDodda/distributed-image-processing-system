@@ -15,39 +15,39 @@ var testLog = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level
 
 func TestResolvePhase(t *testing.T) {
 	cases := []struct {
-		name      string
-		status    jobStatus
+		name string
+		status jobStatus
 		wantPhase JobPhase
-		wantErr   bool
+		wantErr bool
 	}{
 		{
-			name:      "succeeded",
-			status:    jobStatus{Succeeded: 1},
+			name: "succeeded",
+			status: jobStatus{Succeeded: 1},
 			wantPhase: JobSucceeded,
 		},
 		{
-			name:      "failed with condition",
-			status:    jobStatus{Failed: 1, Conditions: []struct {
-				Type   string `json:"type"`
+			name: "failed with condition",
+			status: jobStatus{Failed: 1, Conditions: []struct {
+				Type string `json:"type"`
 				Status string `json:"status"`
 			}{{Type: "Failed", Status: "True"}}},
 			wantPhase: JobFailed,
-			wantErr:   true,
+			wantErr: true,
 		},
 		{
-			name:      "failed without condition",
-			status:    jobStatus{Failed: 1},
+			name: "failed without condition",
+			status: jobStatus{Failed: 1},
 			wantPhase: JobFailed,
-			wantErr:   true,
+			wantErr: true,
 		},
 		{
-			name:      "still active",
-			status:    jobStatus{Active: 1},
+			name: "still active",
+			status: jobStatus{Active: 1},
 			wantPhase: "",
 		},
 		{
-			name:      "not started",
-			status:    jobStatus{},
+			name: "not started",
+			status: jobStatus{},
 			wantPhase: "",
 		},
 	}
@@ -102,8 +102,8 @@ func TestWatcher_poll_emitsAndDeletes(t *testing.T) {
 	defer srv.Close()
 
 	client := &Client{
-		apiserver:  srv.URL,
-		namespace:  "petabyte",
+		apiserver: srv.URL,
+		namespace: "petabyte",
 		httpClient: srv.Client(),
 	}
 	w := NewWatcher(client, time.Hour, testLog)

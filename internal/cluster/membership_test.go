@@ -40,7 +40,7 @@ func TestMembership_heartbeat_updates_metrics(t *testing.T) {
 	m.Register(cluster.RegisterRequest{ID: "w1", Address: "localhost:9001"})
 
 	hb := cluster.Heartbeat{
-		NodeID:  "w1",
+		NodeID: "w1",
 		Metrics: cluster.NodeMetrics{ActiveTasks: 5, CPUPct: 80.0},
 	}
 	if err := m.Heartbeat(hb); err != nil {
@@ -83,7 +83,7 @@ func TestMembership_activeToSuspect(t *testing.T) {
 func TestMembership_suspectToDead(t *testing.T) {
 	const (
 		suspect = 5 * time.Millisecond
-		dead    = 10 * time.Millisecond
+		dead = 10 * time.Millisecond
 	)
 	m := newMembership(suspect, dead)
 	m.Register(cluster.RegisterRequest{ID: "w1", Address: "localhost:9001"})
@@ -118,7 +118,7 @@ func TestMembership_recoveryFromSuspect(t *testing.T) {
 func TestMembership_recoveryFromDead(t *testing.T) {
 	const (
 		suspect = 5 * time.Millisecond
-		dead    = 10 * time.Millisecond
+		dead = 10 * time.Millisecond
 	)
 	m := newMembership(suspect, dead)
 	m.Register(cluster.RegisterRequest{ID: "w1", Address: "localhost:9001"})
@@ -209,7 +209,7 @@ func TestMembership_concurrentHeartbeatAndTick(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				m.Heartbeat(cluster.Heartbeat{
-					NodeID:  id,
+					NodeID: id,
 					Metrics: cluster.NodeMetrics{ActiveTasks: j},
 				})
 			}

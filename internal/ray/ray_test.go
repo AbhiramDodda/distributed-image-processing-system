@@ -18,8 +18,8 @@ func TestHealthCheck_success(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"data": map[string]any{
-				"node_count":  4,
-				"gpu_count":   8,
+				"node_count": 4,
+				"gpu_count": 8,
 				"ray_version": "2.9.0",
 			},
 		})
@@ -94,7 +94,7 @@ func TestGetJob(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"submission_id": "sub-123",
-			"status":        "SUCCEEDED",
+			"status": "SUCCEEDED",
 		})
 	}))
 	defer srv.Close()
@@ -118,7 +118,7 @@ func TestWaitForJob_terminalState(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"submission_id": "sub-123",
-			"status":        status,
+			"status": status,
 		})
 	}))
 	defer srv.Close()
@@ -139,7 +139,7 @@ func TestWaitForJob_contextCancel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"submission_id": "sub-123",
-			"status":        "RUNNING", // never terminal
+			"status": "RUNNING", // never terminal
 		})
 	}))
 	defer srv.Close()

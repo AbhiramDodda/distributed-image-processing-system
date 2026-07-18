@@ -41,12 +41,12 @@ const minStealItems = 2
 
 func New(ring *cluster.Ring, maxRetries int, log *slog.Logger) *Scheduler {
 	s := &Scheduler{
-		jobs:       make(map[string]*Job),
-		tasks:      make(map[string]*Task),
-		ring:       ring,
+		jobs: make(map[string]*Job),
+		tasks: make(map[string]*Task),
+		ring: ring,
 		maxRetries: maxRetries,
 		leaseChunk: defaultLeaseChunk,
-		log:        log,
+		log: log,
 	}
 	s.mu.SetName("scheduler.mu")
 	return s
@@ -83,15 +83,15 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 	}
 
 	job := &Job{
-		ID:         uuid.New().String(),
-		Dataset:    req.Dataset,
-		Algorithm:  req.Algorithm,
-		Config:     req.Config,
-		Priority:   req.Priority,
-		Status:     JobPending,
-		Shards:     shards,
+		ID: uuid.New().String(),
+		Dataset: req.Dataset,
+		Algorithm: req.Algorithm,
+		Config: req.Config,
+		Priority: req.Priority,
+		Status: JobPending,
+		Shards: shards,
 		TotalTasks: len(shards),
-		CreatedAt:  time.Now(),
+		CreatedAt: time.Now(),
 	}
 
 	s.mu.Lock()
@@ -100,13 +100,13 @@ func (s *Scheduler) Submit(req SubmitJobRequest) (*Job, error) {
 	s.jobs[job.ID] = job
 	for _, shard := range shards {
 		t := &Task{
-			ID:         uuid.New().String(),
-			JobID:      job.ID,
-			Shard:      shard,
-			Status:     TaskPending,
-			Priority:   job.Priority,
+			ID: uuid.New().String(),
+			JobID: job.ID,
+			Shard: shard,
+			Status: TaskPending,
+			Priority: job.Priority,
 			MaxRetries: s.maxRetries,
-			RangeEnd:   -1, // shard size unknown until a worker reports it
+			RangeEnd: -1, // shard size unknown until a worker reports it
 		}
 		s.tasks[t.ID] = t
 		s.pendingQ = append(s.pendingQ, t.ID)
@@ -234,17 +234,17 @@ func (s *Scheduler) checkLeaseInvariant(t *Task) {
 func (s *Scheduler) assignmentFor(t *Task) *TaskAssignment {
 	job := s.jobs[t.JobID]
 	return &TaskAssignment{
-		TaskID:     t.ID,
-		JobID:      t.JobID,
-		Shard:      t.Shard,
-		Dataset:    job.Dataset,
-		Algorithm:  job.Algorithm,
-		Config:     job.Config,
+		TaskID: t.ID,
+		JobID: t.JobID,
+		Shard: t.Shard,
+		Dataset: job.Dataset,
+		Algorithm: job.Algorithm,
+		Config: job.Config,
 		RangeStart: t.RangeStart,
-		RangeEnd:   t.RangeEnd,
-		Bound:      t.Granted,
+		RangeEnd: t.RangeEnd,
+		Bound: t.Granted,
 		Generation: t.Generation,
-		Split:      t.Split,
+		Split: t.Split,
 	}
 }
 
@@ -413,8 +413,8 @@ func (s *Scheduler) RenewLease(taskID string, req RenewLeaseRequest) (LeaseRenew
 
 	return LeaseRenewal{
 		Generation: t.Generation,
-		Bound:      t.Granted,
-		Stolen:     req.Generation < t.Generation,
+		Bound: t.Granted,
+		Stolen: req.Generation < t.Generation,
 	}, nil
 }
 
@@ -450,16 +450,16 @@ func (s *Scheduler) stealLocked() *Task {
 	}
 
 	stolen := &Task{
-		ID:         uuid.New().String(),
-		JobID:      victim.JobID,
-		Shard:      victim.Shard,
-		Status:     TaskPending,
+		ID: uuid.New().String(),
+		JobID: victim.JobID,
+		Shard: victim.Shard,
+		Status: TaskPending,
 		MaxRetries: victim.MaxRetries,
 		RangeStart: split,
-		RangeEnd:   victim.RangeEnd,
-		Frontier:   split,
-		Granted:    split,
-		Split:      true,
+		RangeEnd: victim.RangeEnd,
+		Frontier: split,
+		Granted: split,
+		Split: true,
 	}
 	victim.RangeEnd = split
 	victim.Generation++

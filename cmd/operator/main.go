@@ -115,7 +115,7 @@ func reportResults(ctx context.Context, coordinatorURL string, results <-chan k8
 			}
 			req := map[string]any{
 				"worker_id": "k8s-operator",
-				"error":     errMsg,
+				"error": errMsg,
 			}
 			if err := postJSON(coordinatorURL+"/v1/tasks/"+r.TaskID+"/result", req); err != nil {
 				log.Error("report task result failed", "task_id", r.TaskID, "err", err)

@@ -45,16 +45,16 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		})
 	}
 	return &Client{
-		s3:     s3.NewFromConfig(awsCfg, s3opts...),
+		s3: s3.NewFromConfig(awsCfg, s3opts...),
 		bucket: cfg.Bucket,
 	}, nil
 }
 
 func (c *Client) Put(ctx context.Context, key string, r io.Reader, contentType string) error {
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(c.bucket),
-		Key:         aws.String(key),
-		Body:        r,
+		Bucket: aws.String(c.bucket),
+		Key: aws.String(key),
+		Body: r,
 		ContentType: aws.String(contentType),
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func (c *Client) Put(ctx context.Context, key string, r io.Reader, contentType s
 func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, int64, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key: aws.String(key),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("get %s: %w", key, err)
@@ -81,7 +81,7 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, int64, err
 func (c *Client) Delete(ctx context.Context, key string) error {
 	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key: aws.String(key),
 	})
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", key, err)
@@ -94,8 +94,8 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 	var token *string
 	for {
 		out, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(c.bucket),
-			Prefix:            aws.String(prefix),
+			Bucket: aws.String(c.bucket),
+			Prefix: aws.String(prefix),
 			ContinuationToken: token,
 		})
 		if err != nil {
@@ -119,9 +119,9 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 // scheduler.Committer).
 func (c *Client) Copy(ctx context.Context, src, dst string) error {
 	_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
-		Bucket:     aws.String(c.bucket),
+		Bucket: aws.String(c.bucket),
 		CopySource: aws.String(fmt.Sprintf("%s/%s", c.bucket, src)),
-		Key:        aws.String(dst),
+		Key: aws.String(dst),
 	})
 	if err != nil {
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
@@ -131,9 +131,9 @@ func (c *Client) Copy(ctx context.Context, src, dst string) error {
 
 func (c *Client) CopyStorageClass(ctx context.Context, key, storageClass string) error {
 	_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
-		Bucket:       aws.String(c.bucket),
-		CopySource:   aws.String(fmt.Sprintf("%s/%s", c.bucket, key)),
-		Key:          aws.String(key),
+		Bucket: aws.String(c.bucket),
+		CopySource: aws.String(fmt.Sprintf("%s/%s", c.bucket, key)),
+		Key: aws.String(key),
 		StorageClass: s3StorageClass(storageClass),
 	})
 	if err != nil {

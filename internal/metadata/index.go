@@ -152,8 +152,8 @@ func (idx *Index) DatasetStats(ctx context.Context, dataset string) (*DatasetSta
 		SELECT COUNT(*), SUM(size_bytes), COUNT(DISTINCT shard)
 		FROM records WHERE dataset = ?`, dataset)
 	s := &DatasetStats{
-		Dataset:       dataset,
-		LabelCount:    make(map[string]int64),
+		Dataset: dataset,
+		LabelCount: make(map[string]int64),
 		TierBreakdown: make(map[storage.StorageTier]int64),
 	}
 	if err := row.Scan(&s.TotalImages, &s.TotalBytes, &s.ShardCount); err != nil {

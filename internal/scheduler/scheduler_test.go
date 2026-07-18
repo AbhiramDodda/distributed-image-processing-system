@@ -22,9 +22,9 @@ func newScheduler(maxRetries int) *scheduler.Scheduler {
 func TestScheduler_submitCreatesOneTasKPerShard(t *testing.T) {
 	s := newScheduler(2)
 	job, err := s.Submit(scheduler.SubmitJobRequest{
-		Dataset:   "train",
+		Dataset: "train",
 		Algorithm: "resnet",
-		Shards:    []string{"00", "01", "02"},
+		Shards: []string{"00", "01", "02"},
 	})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -85,7 +85,7 @@ func TestScheduler_fullTaskLifecycle_jobCompletes(t *testing.T) {
 		}
 		s.StartTask(a.TaskID, "worker-1")
 		s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
-			WorkerID:        "worker-1",
+			WorkerID: "worker-1",
 			ImagesProcessed: 100,
 		})
 	}
@@ -111,7 +111,7 @@ func TestScheduler_taskError_requeues(t *testing.T) {
 	a, _ := s.PollTasks("worker-1")
 	s.ReportResult(context.Background(), a.TaskID, scheduler.ResultRequest{
 		WorkerID: "worker-1",
-		Error:    "network timeout",
+		Error: "network timeout",
 	})
 
 	// Task should be back in the queue

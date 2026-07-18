@@ -15,22 +15,22 @@ type JobPhase string
 
 const (
 	JobSucceeded JobPhase = "Succeeded"
-	JobFailed    JobPhase = "Failed"
+	JobFailed JobPhase = "Failed"
 )
 
 type jobStatus struct {
 	Succeeded int32 `json:"succeeded"`
-	Failed    int32 `json:"failed"`
-	Active    int32 `json:"active"`
+	Failed int32 `json:"failed"`
+	Active int32 `json:"active"`
 	Conditions []struct {
-		Type   string `json:"type"`
+		Type string `json:"type"`
 		Status string `json:"status"`
 	} `json:"conditions,omitempty"`
 }
 
 type jobItem struct {
 	Metadata struct {
-		Name   string            `json:"name"`
+		Name string `json:"name"`
 		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Status jobStatus `json:"status"`
@@ -42,26 +42,26 @@ type jobList struct {
 
 // JobResult is sent to the coordinator when a K8s Job completes.
 type JobResult struct {
-	TaskID  string
+	TaskID string
 	JobName string
-	Phase   JobPhase
-	Error   string
+	Phase JobPhase
+	Error string
 }
 
 // Watcher polls K8s for petabyte worker Jobs and notifies results.
 type Watcher struct {
-	client   *Client
+	client *Client
 	interval time.Duration
-	results  chan JobResult
-	log      *slog.Logger
+	results chan JobResult
+	log *slog.Logger
 }
 
 func NewWatcher(client *Client, interval time.Duration, log *slog.Logger) *Watcher {
 	return &Watcher{
-		client:   client,
+		client: client,
 		interval: interval,
-		results:  make(chan JobResult, 256),
-		log:      log,
+		results: make(chan JobResult, 256),
+		log: log,
 	}
 }
 
@@ -98,10 +98,10 @@ func (w *Watcher) poll(ctx context.Context) {
 			continue
 		}
 		w.results <- JobResult{
-			TaskID:  taskID,
+			TaskID: taskID,
 			JobName: item.Metadata.Name,
-			Phase:   phase,
-			Error:   errMsg,
+			Phase: phase,
+			Error: errMsg,
 		}
 		if err := w.deleteJob(ctx, item.Metadata.Name); err != nil {
 			w.log.Warn("delete completed job failed", "name", item.Metadata.Name, "err", err)

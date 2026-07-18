@@ -24,8 +24,8 @@ func newTestServer(t *testing.T) *httptest.Server {
 	cfg := &config.Config{
 		Coordinator: config.CoordinatorConfig{
 			SuspectTimeout: 10 * time.Second,
-			DeadTimeout:    20 * time.Second,
-			VnodesPerNode:  50,
+			DeadTimeout: 20 * time.Second,
+			VnodesPerNode: 50,
 			TaskMaxRetries: 2,
 		},
 	}
@@ -99,9 +99,9 @@ func TestCoordinator_submitAndGetJob(t *testing.T) {
 	srv := newTestServer(t)
 
 	resp := postJSON(t, srv.URL+"/v1/jobs", scheduler.SubmitJobRequest{
-		Dataset:   "train",
+		Dataset: "train",
 		Algorithm: "resnet",
-		Shards:    []string{"00", "01", "02"},
+		Shards: []string{"00", "01", "02"},
 	})
 	var submitResp scheduler.SubmitJobResponse
 	decode(t, resp, &submitResp)
@@ -256,7 +256,7 @@ func TestCoordinator_heartbeatUpdatesMetrics(t *testing.T) {
 	})
 
 	hb := cluster.Heartbeat{
-		NodeID:  "w1",
+		NodeID: "w1",
 		Metrics: cluster.NodeMetrics{ActiveTasks: 7, CPUPct: 65.5},
 	}
 	resp := postJSON(t, srv.URL+"/v1/cluster/heartbeat", hb)

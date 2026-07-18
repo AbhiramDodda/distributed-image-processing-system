@@ -27,8 +27,8 @@ import (
 // Parquet so the corpus is directly queryable by Athena / DuckDB / Spark, and
 // re-loadable by the Go k-NN engine without a separate index format.
 type Embedding struct {
-	ID string      // object key or filename -- the search result identity
-	Dataset string  // logical dataset the image belongs to
+	ID string // object key or filename -- the search result identity
+	Dataset string // logical dataset the image belongs to
 	Vector []float32 // CLIP embedding; length must equal the file's dim
 }
 

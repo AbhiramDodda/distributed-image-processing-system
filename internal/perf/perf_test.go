@@ -30,15 +30,15 @@ var discardLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 // ---- latency / throughput helpers ----
 
 type latencyStats struct {
-	name       string
-	samples    int
-	min        time.Duration
-	p50        time.Duration
-	p90        time.Duration
-	p95        time.Duration
-	p99        time.Duration
-	p100       time.Duration
-	mean       time.Duration
+	name string
+	samples int
+	min time.Duration
+	p50 time.Duration
+	p90 time.Duration
+	p95 time.Duration
+	p99 time.Duration
+	p100 time.Duration
+	mean time.Duration
 	throughput float64 // ops/sec, sequential
 }
 
@@ -75,15 +75,15 @@ func measure(name string, n int, fn func(i int)) latencyStats {
 	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
 
 	return latencyStats{
-		name:       name,
-		samples:    n,
-		min:        ds[0],
-		p50:        pct(ds, 50),
-		p90:        pct(ds, 90),
-		p95:        pct(ds, 95),
-		p99:        pct(ds, 99),
-		p100:       pct(ds, 100),
-		mean:       sum / time.Duration(n),
+		name: name,
+		samples: n,
+		min: ds[0],
+		p50: pct(ds, 50),
+		p90: pct(ds, 90),
+		p95: pct(ds, 95),
+		p99: pct(ds, 99),
+		p100: pct(ds, 100),
+		mean: sum / time.Duration(n),
 		throughput: float64(n) / total.Seconds(),
 	}
 }
@@ -193,14 +193,14 @@ func metadataStats(t *testing.T) (latencyStats, latencyStats) {
 	insertStats := measure("Metadata.Insert (SQLite WAL)", inserts, func(i int) {
 		fn := fmt.Sprintf("img_%08d.jpg", i)
 		_ = idx.Insert(ctx, metadata.DataRecord{
-			ID:        fmt.Sprintf("id-%d", i),
-			Filename:  fn,
-			S3Key:     storage.ObjectKey("train", fn),
-			Shard:     storage.ShardKey(fn),
-			Dataset:   "train",
+			ID: fmt.Sprintf("id-%d", i),
+			Filename: fn,
+			S3Key: storage.ObjectKey("train", fn),
+			Shard: storage.ShardKey(fn),
+			Dataset: "train",
 			SizeBytes: 4096,
-			Labels:    []string{"cat", "animal"},
-			Tier:      storage.TierHot,
+			Labels: []string{"cat", "animal"},
+			Tier: storage.TierHot,
 			IndexedAt: time.Now(),
 		})
 	})
@@ -218,8 +218,8 @@ func coordinatorHTTPStats(t *testing.T) latencyStats {
 	t.Helper()
 	cfg := &config.Config{Coordinator: config.CoordinatorConfig{
 		SuspectTimeout: 10 * time.Second,
-		DeadTimeout:    20 * time.Second,
-		VnodesPerNode:  150,
+		DeadTimeout: 20 * time.Second,
+		VnodesPerNode: 150,
 		TaskMaxRetries: 0,
 	}}
 	coord := coordinator.New(cfg, discardLog)
@@ -348,9 +348,9 @@ func BenchmarkSchedulerSubmit(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s.Submit(scheduler.SubmitJobRequest{
-			Dataset:   "train",
+			Dataset: "train",
 			Algorithm: "resnet",
-			Shards:    []string{"00", "01", "02", "03"},
+			Shards: []string{"00", "01", "02", "03"},
 		})
 	}
 }
@@ -367,13 +367,13 @@ func BenchmarkMetadataInsert(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		fn := fmt.Sprintf("img_%08d.jpg", i)
 		idx.Insert(ctx, metadata.DataRecord{
-			ID:        fmt.Sprintf("id-%d", i),
-			Filename:  fn,
-			S3Key:     storage.ObjectKey("train", fn),
-			Shard:     storage.ShardKey(fn),
-			Dataset:   "train",
+			ID: fmt.Sprintf("id-%d", i),
+			Filename: fn,
+			S3Key: storage.ObjectKey("train", fn),
+			Shard: storage.ShardKey(fn),
+			Dataset: "train",
 			SizeBytes: 4096,
-			Tier:      storage.TierHot,
+			Tier: storage.TierHot,
 			IndexedAt: time.Now(),
 		})
 	}

@@ -52,8 +52,8 @@ func (a *API) handlePendingMetric(w http.ResponseWriter, r *http.Request) {
 		ratio = float64(pending) / float64(active)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"pending_tasks":            pending,
-		"active_workers":           active,
+		"pending_tasks": pending,
+		"active_workers": active,
 		"pending_tasks_per_worker": ratio,
 	})
 }
@@ -65,18 +65,18 @@ func (a *API) handlePendingMetric(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleTaskMetric(w http.ResponseWriter, r *http.Request) {
 	m := a.coord.sched.Metrics()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tasks_total":     m.TasksTotal,
-		"pending":         m.Pending,
-		"assigned":        m.Assigned,
-		"running":         m.Running,
-		"done":            m.Done,
-		"failed":          m.Failed,
-		"rebalances":      m.Rebalances,
-		"active_workers":  len(a.coord.membership.ActiveNodes()),
-		"latency_p50_ms":  m.LatencyP50Ms,
-		"latency_p95_ms":  m.LatencyP95Ms,
-		"latency_p99_ms":  m.LatencyP99Ms,
-		"latency_max_ms":  m.LatencyMaxMs,
+		"tasks_total": m.TasksTotal,
+		"pending": m.Pending,
+		"assigned": m.Assigned,
+		"running": m.Running,
+		"done": m.Done,
+		"failed": m.Failed,
+		"rebalances": m.Rebalances,
+		"active_workers": len(a.coord.membership.ActiveNodes()),
+		"latency_p50_ms": m.LatencyP50Ms,
+		"latency_p95_ms": m.LatencyP95Ms,
+		"latency_p99_ms": m.LatencyP99Ms,
+		"latency_max_ms": m.LatencyMaxMs,
 		"latency_mean_ms": m.LatencyMeanMs,
 	})
 }
@@ -88,11 +88,11 @@ func (a *API) handleAdmissionMetric(w http.ResponseWriter, r *http.Request) {
 	}
 	s := a.coord.admission.Stats()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":              true,
-		"max_in_flight":        s.MaxInFlight,
-		"in_flight":            s.InFlight,
-		"admitted_total":       s.Admitted,
-		"rejected_total":       s.Rejected,
+		"enabled": true,
+		"max_in_flight": s.MaxInFlight,
+		"in_flight": s.InFlight,
+		"admitted_total": s.Admitted,
+		"rejected_total": s.Rejected,
 		"per_tenant_in_flight": s.PerTenant,
 	})
 }
@@ -155,7 +155,7 @@ func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleRing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"node_count":   a.coord.ring.NodeCount(),
+		"node_count": a.coord.ring.NodeCount(),
 		"distribution": a.coord.ring.Distribution(),
 	})
 }
@@ -201,7 +201,7 @@ func (a *API) handleJobs(w http.ResponseWriter, r *http.Request) {
 			a.coord.trackTicket(job.ID, ticket)
 		}
 		writeJSON(w, http.StatusCreated, scheduler.SubmitJobResponse{
-			JobID:      job.ID,
+			JobID: job.ID,
 			TotalTasks: job.TotalTasks,
 		})
 	case http.MethodGet:
@@ -242,7 +242,7 @@ func (a *API) handlePoll(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, scheduler.PollResponse{
 		Assignment: assignment,
-		HasWork:    assignment != nil,
+		HasWork: assignment != nil,
 	})
 }
 

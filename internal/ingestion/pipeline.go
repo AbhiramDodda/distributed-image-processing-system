@@ -37,12 +37,12 @@ type Pipeline struct {
 
 func New(store *storage.Client, idx *metadata.Index, workers int, log *slog.Logger) *Pipeline {
 	return &Pipeline{
-		store:                store,
-		idx:                  idx,
-		workers:              workers,
-		log:                  log,
-		multipartThreshold:   100 * 1024 * 1024,
-		multipartChunkSize:   64 * 1024 * 1024,
+		store: store,
+		idx: idx,
+		workers: workers,
+		log: log,
+		multipartThreshold: 100 * 1024 * 1024,
+		multipartChunkSize: 64 * 1024 * 1024,
 		multipartConcurrency: 8,
 	}
 }
@@ -101,8 +101,8 @@ func (p *Pipeline) IngestDir(ctx context.Context, localDir, dataset string, labe
 
 	return &Progress{
 		Processed: processed.Load(),
-		Failed:    failed.Load(),
-		Bytes:     bytes.Load(),
+		Failed: failed.Load(),
+		Bytes: bytes.Load(),
 	}, err
 }
 
@@ -141,16 +141,16 @@ func (p *Pipeline) ingestFile(ctx context.Context, job fileJob) (int64, error) {
 	}
 
 	rec := metadata.DataRecord{
-		ID:        uuid.New().String(),
-		Filename:  filename,
-		S3Key:     key,
-		Shard:     storage.ShardKey(filename),
-		Dataset:   job.dataset,
+		ID: uuid.New().String(),
+		Filename: filename,
+		S3Key: key,
+		Shard: storage.ShardKey(filename),
+		Dataset: job.dataset,
 		SizeBytes: info.Size(),
-		Checksum:  checksum,
-		Labels:    job.labels,
-		Meta:      map[string]string{"source_path": job.localPath},
-		Tier:      storage.TierHot,
+		Checksum: checksum,
+		Labels: job.labels,
+		Meta: map[string]string{"source_path": job.localPath},
+		Tier: storage.TierHot,
 		IndexedAt: time.Now(),
 	}
 

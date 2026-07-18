@@ -37,12 +37,12 @@ func main() {
 	}
 
 	store, err := storage.NewClient(context.Background(), storage.ClientConfig{
-		Endpoint:        cfg.Storage.Endpoint,
-		Region:          cfg.Storage.Region,
-		Bucket:          cfg.Storage.Bucket,
-		AccessKeyID:     cfg.Storage.AccessKeyID,
+		Endpoint: cfg.Storage.Endpoint,
+		Region: cfg.Storage.Region,
+		Bucket: cfg.Storage.Bucket,
+		AccessKeyID: cfg.Storage.AccessKeyID,
 		SecretAccessKey: cfg.Storage.SecretAccessKey,
-		UsePathStyle:    cfg.Storage.UsePathStyle,
+		UsePathStyle: cfg.Storage.UsePathStyle,
 	})
 	if err != nil {
 		log.Error("init storage", "err", err)
