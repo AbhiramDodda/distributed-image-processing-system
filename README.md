@@ -294,27 +294,97 @@ results *can* be a given class). Embedding streams in batches (bounded memory, ~
 ### Failure resilience (chaos-tested)
 
 The failure story is only worth as much as its evidence, so `scripts/chaos-demo.sh`
-proves it on a real dataset: it ingests the **10,000-image CIFAR-10 test set** as objects
-into MinIO (sharded across all 256 shards), brings up **10 worker nodes**, and runs the
-same job twice — once with every worker healthy, once **`kill -9`-ing 3 of the 10 workers
-mid-flight** (at ~⅓ done). What happens when a third of the fleet dies uncleanly:
+proves it on real datasets: it ingests real images as objects into MinIO (sharded across
+all 256 shards), brings up **10 worker nodes**, and runs the same job twice — once with
+every worker healthy, once **`kill -9`-ing 3 of the 10 workers mid-flight** (at ~⅓ done).
 
-- **Zero data lost.** Both runs finish **256/256 tasks, 0 failed**. The phi-accrual detector
-  (tuned to suspect=2s/dead=4s for the demo) marks the silent workers dead, the coordinator's
-  `RebalanceWorker` requeues their in-flight tasks (**24 rebalanced** in the measured run), and
-  the idempotent `FinalResultKey` makes each re-run *overwrite* rather than duplicate or drop —
-  so every shard still completes exactly once.
-- **Latency cost is bounded and explainable.** End-to-end job time went **2.76 s → 6.69 s**
-  (Δ +3.9 s), dominated by the dead-detection window (survivors briefly idle until the failed
-  workers are declared dead) plus whole-shard reprocessing of the interrupted tasks. Per-task
-  latency barely moved (p50 82 → 88 ms); the failure tax is in *detection + requeue*, not
-  steady-state throughput.
+**At scale — 1.28M real ImageNet objects.** The headline run is the full
+`benjamin-paine/imagenet-1k-256x256` train split: **1,281,167 real 256×256 JPEGs (19 GB)**
+ingested as objects, then chaos-tested. Killing 3 of 10 workers mid-job:
 
-This is a correctness-under-failure proof, not a volume benchmark (CIFAR is ~15 MB) — but the
-mechanism is size-independent: content-addressed sharding spreads any corpus across the 256
-shards, work-stealing splits hot shards, and the exactly-once commit + rebalance hold per
-task regardless of total size. Observed live via `/v1/metrics/tasks` (state counts,
-`rebalances`, latency percentiles) and `/v1/cluster/nodes` (per-worker Active→Suspect→Dead).
+| Metric | Baseline (healthy) | Chaos (kill 3/10) |
+| --- | --- | --- |
+| tasks done / total | 256 / 256 | **256 / 256** |
+| tasks failed | 0 | **0** |
+| tasks **lost** | 0 | **0** |
+| tasks rebalanced off dead workers | — | **52** |
+| end-to-end job wall time | 284.7 s | 353.2 s (**Δ +68.5 s**) |
+| task latency p50 / p95 | 84.9 s / 113.8 s | 85.7 s / 120.9 s |
+
+**Zero tasks lost** despite a third of the fleet dying uncleanly: the phi-accrual detector
+(tuned suspect=2s/dead=4s for the demo) marks the silent workers dead, `RebalanceWorker`
+requeues their 52 in-flight tasks, and the idempotent `FinalResultKey` makes each re-run
+*overwrite* rather than duplicate or drop — every shard completes exactly once. The +68.5 s
+tax is the dead-detection window plus whole-shard reprocessing of interrupted tasks, not a
+steady-state throughput hit (per-task p50 barely moved).
+
+**Also verified on the 10,000-image CIFAR-10 test set** (same harness, `DATASET=cifar`):
+256/256 tasks both runs, 0 failed, 24 rebalanced; latency **2.76 s → 6.69 s** (Δ +3.9 s),
+per-task p50 82 → 88 ms. A fast, small correctness check; the ImageNet run is the volume one.
+
+The mechanism is size-independent: content-addressed sharding spreads any corpus across the
+256 shards, and the exactly-once commit + rebalance hold per task regardless of total size.
+Observed live via `/v1/metrics/tasks` (state counts, `rebalances`, latency percentiles) and
+`/v1/cluster/nodes` (per-worker Active→Suspect→Dead).
+
+#### Reproduce it
+
+Requires the local demo harness at `~/petabyte-demo` (MinIO + `mc` binaries) and a Python
+venv with `datasets`, `pyarrow`, `huggingface_hub`, `pillow`.
+
+```bash
+# 1. Dump the full ImageNet train split to real JPEGs on disk (memory-bounded, resumable,
+#    ~7 min, 19 GB). Do NOT use dump_dataset.py --stream at this size — it OOMs at ~430k.
+python scripts/clip/dump_parquet_images.py \
+    --hf-dataset benjamin-paine/imagenet-1k-256x256 --split train \
+    --subdirs 256 --name-prefix imagenet --out ~/petabyte-demo/imagenet-images
+
+# 2. Ingest into MinIO + run baseline & chaos (first run ingests ~1.28M objects, ~1.5 h).
+DATASET=imagenet INGEST_DIR=~/petabyte-demo/imagenet-images WORKERS=10 KILL=3 \
+    scripts/chaos-demo.sh
+
+# 3. Re-run the job/chaos phase later WITHOUT re-ingesting (objects persist in minio-data):
+DATASET=imagenet SKIP_INGEST=1 WORKERS=10 KILL=3 scripts/chaos-demo.sh
+
+# The small CIFAR-10 variant (minutes end-to-end):
+python scripts/clip/dump_dataset.py --hf-dataset uoft-cs/cifar10 --split test \
+    --out ~/petabyte-demo/cifar-images
+DATASET=cifar INGEST_DIR=~/petabyte-demo/cifar-images scripts/chaos-demo.sh
+```
+
+Env knobs: `WORKERS` (10), `KILL` (3), `CONCURRENCY` (8 — parallel tasks per worker),
+`LEASE_CHUNK` (100000 — set high to grant each shard whole on a uniform corpus; drop to
+~1000 to deliberately exercise work-stealing on skewed shards), `SKIP_INGEST`, `INGEST_DIR`.
+
+#### Why this is *not* industry-standard production code
+
+This is a portfolio/learning system that demonstrates the mechanisms honestly; it is **not**
+something you would run a real petabyte fleet on. Concretely:
+
+- **Single-box, not a real cluster.** "10 workers" are 10 processes on one machine against a
+  single local MinIO on the same disk; there is no real network, no multi-node MinIO, no rack
+  or AZ fault domains. Real distributed failures (partitions, slow disks, GC pauses, clock
+  skew) are only approximated.
+- **The 1.28M run is ~19 GB, not a petabyte.** It proves the *mechanism* scales in object
+  count (1.28M objects / 256 shards / 52 rebalanced tasks), not that the system moves petabytes.
+  Byte throughput here is bounded by one local disk, not a distributed store.
+- **Metadata is SQLite.** A single-writer embedded DB is a hard scaling ceiling — the ingest
+  already hit `SQLITE_BUSY` under 16-way write contention (worked around with a 30 s
+  `busy_timeout`). Production would use a real distributed metadata store.
+- **Exactly-once has a known gap.** The result-copy and done-mark aren't a single atomic
+  replicated log entry, so a coordinator crash in a narrow window can re-run a committed task
+  (safe because commits are idempotent, but not truly exactly-once). See *Future Plans*.
+- **Tuned-for-demo timeouts.** suspect=2 s / dead=4 s make failures visible in seconds; real
+  deployments need far more conservative detection to avoid false-positive failovers under load.
+- **Work-stealing is naive.** It fragments large uniform shards into quadratic re-listing
+  unless `lease_chunk` is hand-tuned (hence the knob above) — a production scheduler would size
+  leases adaptively rather than relying on an operator to pick the right constant.
+- **No security/multitenancy/ops.** Dev-only static credentials, no auth/encryption/quotas, no
+  real deployment, autoscaling, upgrade, or backup story.
+
+The value here is the *correctness reasoning* — content-addressed sharding, phi-accrual failure
+detection, idempotent commits, work-stealing — demonstrated with real data and real numbers,
+not a claim of production readiness.
 
 ## Future Plans
 
