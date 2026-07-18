@@ -61,17 +61,31 @@ def run_real(args):
 
     if not os.path.exists(args.urls):
         sys.exit(f"--urls file not found: {args.urls} (or use --synthetic)")
+    # Each line is "url" or "id<space>url": an optional leading id gives the result a
+    # readable label (CLIP only ever sees pixels, so the id never affects retrieval).
+    entries = []
     with open(args.urls) as f:
-        urls = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+        for ln in f:
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            parts = ln.split(None, 1)
+            if len(parts) == 2:
+                entries.append((parts[0], parts[1]))
+            else:
+                entries.append((parts[0].rsplit("/", 1)[-1] or parts[0], parts[0]))
+
+    # Some hosts reject a generic library User-Agent (403), so identify the client.
+    headers = {"User-Agent": "petabyte-platform-clip-demo/1.0 (https://github.com/AbhiramDodda/distributed-image-processing-system)"}
 
     ids, tensors = [], []
-    for url in urls:
+    for item_id, url in entries:
         try:
-            resp = requests.get(url, timeout=20)
+            resp = requests.get(url, timeout=20, headers=headers)
             resp.raise_for_status()
             img = Image.open(io.BytesIO(resp.content)).convert("RGB")
             tensors.append(preprocess(img))
-            ids.append(url.rsplit("/", 1)[-1] or url)
+            ids.append(item_id)
         except Exception as e:  # skip a dead URL rather than abort the whole run
             print(f"skip {url}: {e}", file=sys.stderr)
     if not tensors:

@@ -1,27 +1,11 @@
 # Small public image sample for the real CLIP demo (embed_corpus.py --urls).
-# Wikimedia Commons thumbnails, a few per concept so text queries are meaningful.
-# Dead links are skipped with a warning; add your own freely (one URL per line).
+# Format: "<id> <url>"  -- the id is a readable label only; CLIP embeds the pixels,
+# never the id. One entry per line; dead links are skipped with a warning. Hosts are
+# chosen for reliable public access (github raw, COCO, HF). Add your own freely.
 
-# dogs
-https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Collage_of_Nine_Dogs.jpg/640px-Collage_of_Nine_Dogs.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/Golde33443.jpg/640px-Golde33443.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Female_German_Shepherd.jpg/640px-Female_German_Shepherd.jpg
-
-# cats
-https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/640px-Cat03.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Cat_August_2010-4.jpg/640px-Cat_August_2010-4.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Felis_catus-cat_on_snow.jpg/640px-Felis_catus-cat_on_snow.jpg
-
-# cars
-https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/2018_Mercedes-Benz_C220d_AMG_Line_Premium_Plus_2.1.jpg/640px-2018_Mercedes-Benz_C220d_AMG_Line_Premium_Plus_2.1.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/2014_Tesla_Model_S_%28front%29.jpg/640px-2014_Tesla_Model_S_%28front%29.jpg
-
-# flowers
-https://upload.wikimedia.org/wikipedia/commons/thumb/f/fd/Sunflower_from_Silesia2.jpg/640px-Sunflower_from_Silesia2.jpg
-https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Tulips_-_floriade_canberra.jpg/640px-Tulips_-_floriade_canberra.jpg
-
-# boats
-https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Sailboat_silhouette.jpg/640px-Sailboat_silhouette.jpg
-
-# birds
-https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Turdus-migratorius-002.jpg/640px-Turdus-migratorius-002.jpg
+dog.jpg              https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg
+two_cats.jpg         http://images.cocodataset.org/val2017/000000039769.jpg
+cat_chonk.jpeg       https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/pipeline-cat-chonk.jpeg
+bus.jpg              https://raw.githubusercontent.com/ultralytics/ultralytics/main/ultralytics/assets/bus.jpg
+soccer_players.jpg   https://raw.githubusercontent.com/ultralytics/ultralytics/main/ultralytics/assets/zidane.jpg
+person_hopper.jpg    https://raw.githubusercontent.com/tensorflow/tensorflow/master/tensorflow/examples/label_image/data/grace_hopper.jpg
