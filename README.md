@@ -246,12 +246,41 @@ load). Verified: `internal/admission` unit tests (fairness, isolation, a concurr
 that never exceeds the cap) plus `TestAdmission_shedsThenReadmitsAfterCompletion` end-to-end
 over HTTP.
 
+### CLIP image similarity search (complete)
+
+The platform's first *end-to-end algorithm*, not just infrastructure: run CLIP embeddings
+over an image corpus, store them columnar as Parquet, and search by nearest neighbour —
+find images from a text prompt ("a photo of a dog") or from an example image.
+
+The division of labour is deliberate. **Vector math lives in Go** (`internal/vsearch`): the
+corpus loads into one contiguous, L2-normalised `float32` buffer and a query is `N` dot
+products with a bounded min-heap for top-k — exact brute-force cosine, `O(N·dim)`. At ≤1M
+vectors that's a few hundred MB scanned per query with no index to build, tune, or keep
+consistent; an ANN index (HNSW/IVF) only earns its complexity well past that scale. **CLIP
+inference lives in Python** (`scripts/clip/`, where torch lives): an offline batch encoder
+writes the corpus, and a tiny online sidecar encodes a query text/image on demand (text→image
+inherently needs the CLIP text encoder live). The two meet at a **fixed Parquet schema**
+(`id`, `dataset`, `vector`) and a **one-line JSON `/encode` contract**, so either side is
+swappable — the corpus is queryable from Athena/DuckDB, and the encoder can be any model.
+
+Four query modes, over both a CLI (`cmd/vsearch`) and an HTTP endpoint (`POST /v1/similar`):
+`-id` (image→image over a corpus member — needs no encoder, self-excluded), `-vector` (a raw
+pre-computed vector), `-text` and `-image` (encoded live by the sidecar). Both surfaces are
+opt-in: the endpoint 501s until `server.search.index_key` is set.
+
+**Live demo (`scripts/clip-search-demo.sh`).** Runs the whole pipeline — Python encodes a
+corpus to Parquet, Go loads it and answers text/id/vector/HTTP queries. `SYNTHETIC=1` (the
+default) uses deterministic concept-clustered stand-in vectors (numpy + pyarrow only, no
+torch, no download) to verify the entire Go↔Parquet↔sidecar contract anywhere: a "dog" query
+returns dog images at cosine ~0.98 vs ~0.07 cross-concept, and the run asserts the planted
+nearest neighbour lands at rank 1. Drop `SYNTHETIC=1` for real open_clip embeddings
+(ViT-B/32 `laion2b`, CPU-runnable) over the sample images in `scripts/clip/sample_urls.txt`,
+which returns genuinely similar images. Verified: `internal/vsearch` unit tests (k-NN
+ordering/tie-break/normalisation-invariance, Parquet round-trip, encoder client) plus the
+`/v1/similar` handler tests, all green under `-race`.
+
 ## Future Plans
 
-- **End-to-end algorithm demo (CLIP / LAION).** Run CLIP embeddings over ~1M public images,
-  store the vectors as Parquet, and build nearest-neighbor image similarity search
-  (brute-force cosine is fine at ≤1M — no Faiss needed). Turns the platform from
-  infrastructure into something demonstrable end-to-end.
 - **Close the exactly-once gap.** Fold the result copy and the done-mark into one replicated
   Raft log entry so a coordinator crash can't re-run a committed task.
 - **Deeper observability.** Causal event tracing across the coordinator/worker boundary, and a
@@ -635,9 +664,10 @@ The operator polls `/v1/operator/drain` on the coordinator to get pending tasks 
 | GET | `/v1/stats?dataset=train` | Total images, bytes, shards |
 | GET | `/v1/shards?dataset=train` | Per-shard distribution |
 | GET | `/v1/shards/{shard}/manifest?dataset=train` | Work manifest for one shard |
-| GET | `/v1/search?label=cat&dataset=train&limit=100` | Label search |
+| GET | `/v1/search?label=cat&dataset=train&limit=100` | Label search (metadata) |
 | GET | `/v1/labels?dataset=train` | Label frequency counts |
 | POST | `/v1/tiering/estimate` | Storage cost projection (body: map of tier -> bytes) |
+| POST | `/v1/similar` | CLIP vector similarity (body: `k` + one of `id`/`vector`/`text`/`image_b64`); `501` until `server.search.index_key` is set |
 
 ### Level 4 Algorithm Registry (:8080)
 
@@ -709,5 +739,6 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | + | Intra-shard work stealing (bounded-grant lease handoff) | Complete (live MinIO demo: `scripts/steal-demo.sh`) |
 | + | Runtime concurrency diagnostics (`internal/diag`, `/debug/diag`) | Complete |
 | + | Backpressure & admission control (`internal/admission`, load-shedding + weighted shares) | Complete |
+| + | CLIP image similarity search (`internal/vsearch`, exact cosine k-NN + `/v1/similar`) | Complete (live demo: `scripts/clip-search-demo.sh`) |
 | + | End-to-end CLIP/LAION similarity-search demo | Planned |
 | + | Causal event tracing + `-race` chaos harness | Planned |

@@ -1,0 +1,12 @@
+# CLIP embedding + query-encoding for the vsearch demo.
+#
+# Synthetic mode (SYNTHETIC=1 / --synthetic) needs only numpy + pyarrow -- no torch,
+# no download. Install the full set for real embeddings; the CPU torch wheel is fine
+# for a few hundred images.
+numpy
+pyarrow
+# --- real CLIP only (heavy; skip for synthetic plumbing) ---
+open_clip_torch
+torch
+pillow
+requests

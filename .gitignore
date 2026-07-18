@@ -40,3 +40,7 @@ coverage.html
 
 # Log files
 *.log
+
+# Python bytecode (CLIP demo scripts)
+__pycache__/
+*.pyc

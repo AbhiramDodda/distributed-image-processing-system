@@ -648,6 +648,44 @@ and "streams into `tf.data`" are concrete requirements, not hypotheticals.
 
 ---
 
+### 6.3 Vector similarity search (CLIP), Go k-NN + Python encoder
+
+**Context.** The end-to-end algorithm demo is image similarity search over CLIP
+embeddings: query by a text prompt or an example image. Two questions — where the
+nearest-neighbour search runs, and where CLIP inference runs.
+
+**Alternatives.**
+
+- **An ANN index (Faiss / HNSW / IVF) for search.**
+  - Pros: sub-linear query at very large `N`.
+  - Cons: an index to build, tune (recall vs. latency), and keep consistent with the
+    corpus; approximate results; a C++/CGo dependency. Overkill below ~1M vectors.
+- **CLIP inference in Go (ONNX runtime / CGo).**
+  - Pros: one language; no sidecar process.
+  - Cons: fights the ecosystem — model weights, tokenizers, and preprocessing all
+    live in the Python/torch world; a Go port is fragile and perpetually behind.
+- **One monolith (all-Python, or all-Go with an embedded model).**
+  - Pros: fewer moving parts.
+  - Cons: couples the concurrent control plane to a GPU/torch runtime, or reimplements
+    a model zoo in Go.
+
+**Decision.** Split at a data contract. **Search is exact brute-force cosine k-NN in
+Go** (`internal/vsearch`): vectors load into one contiguous L2-normalised `float32`
+buffer, a query is `N` dot products, and a bounded min-heap keeps top-k in
+`O(N log k)`. At ≤1M vectors this is a few hundred MB scanned per query with *no*
+index to build or drift — exact, simple, debuggable; ANN earns its complexity only
+past that scale. **CLIP inference is Python** (`scripts/clip/`): an offline batch
+encoder writes the corpus and an online sidecar encodes query text/image on demand.
+The two meet at a **fixed Parquet schema** (`id`, `dataset`, `vector`) and a tiny
+**JSON `/encode` contract**, so each side is independently swappable and the corpus
+stays queryable from Athena/DuckDB. The trade-off is a second (Python) process and a
+network hop per text/image query; accepted because it keeps the model in its native
+ecosystem while the platform keeps owning the vector math. `id`/`vector` queries skip
+the sidecar entirely, so image→image over the corpus and scripted queries need no
+Python at all.
+
+---
+
 ## 7. Cross-cutting
 
 ### 7.1 Go as the implementation language

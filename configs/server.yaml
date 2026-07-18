@@ -16,6 +16,9 @@ server:
   host: "0.0.0.0"
   port: 8080
   metadata_db_path: "./metadata.db"
+  search:                          # CLIP vector similarity (POST /v1/similar); disabled while index_key is empty
+    index_key: ""                  # embeddings Parquet: local path or object-storage key
+    encoder_url: ""                # Python CLIP sidecar base URL, only needed for text/image queries (e.g. http://127.0.0.1:8600)
 
 ingestion:
   workers: 16

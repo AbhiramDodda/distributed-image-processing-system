@@ -68,6 +68,7 @@ func main() {
 	mux := http.NewServeMux()
 	registerRoutes(mux, idx, store, tierEngine, log)
 	algorithmRoutes(mux, reg, registry.DefaultQuota(), log)
+	similarRoutes(mux, cfg.Server.Search, store, log)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{

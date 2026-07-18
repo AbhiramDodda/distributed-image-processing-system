@@ -102,6 +102,17 @@ type ServerConfig struct {
 	Port int `yaml:"port"`
 	MetadataDBPath string `yaml:"metadata_db_path"`
 	RegistryDBPath string `yaml:"registry_db_path"`
+	Search SearchConfig `yaml:"search"`
+}
+
+// SearchConfig enables the CLIP vector-similarity endpoint (POST /v1/similar). It
+// is opt-in: with IndexKey empty the route is disabled and server behaviour is
+// unchanged. IndexKey is a Parquet embedding corpus (local path or object-storage
+// key); EncoderURL is the Python CLIP sidecar used only for text/image queries
+// (id/vector queries need no encoder).
+type SearchConfig struct {
+	IndexKey string `yaml:"index_key"`
+	EncoderURL string `yaml:"encoder_url"`
 }
 
 type IngestionConfig struct {
