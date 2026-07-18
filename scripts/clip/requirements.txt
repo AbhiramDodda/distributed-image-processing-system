@@ -10,3 +10,4 @@ open_clip_torch
 torch
 pillow
 requests
+datasets   # only for embed_corpus.py --hf-dataset (the labelled-dataset eval)

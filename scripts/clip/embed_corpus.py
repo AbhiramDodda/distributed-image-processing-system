@@ -50,14 +50,55 @@ def run_synthetic(args):
     write_parquet(args.out, ids, args.dataset, vectors)
 
 
-def run_real(args):
-    import requests
-    import torch
+def load_clip(args):
     import open_clip
-    from PIL import Image
-
     model, _, preprocess = open_clip.create_model_and_transforms(args.model, pretrained=args.pretrained)
     model.eval()
+    return model, preprocess
+
+
+def encode_images(model, preprocess, images, batch):
+    """Run the CLIP image encoder over PIL images, L2-normalised, in batches."""
+    import torch
+    tensors = [preprocess(im.convert("RGB")) for im in images]
+    vectors = []
+    with torch.no_grad():
+        for start in range(0, len(tensors), batch):
+            feats = model.encode_image(torch.stack(tensors[start:start + batch]))
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+            vectors.extend(feats.cpu().numpy().astype(np.float32))
+    return vectors
+
+
+def run_hf(args):
+    """Embed a real labelled image dataset from the HuggingFace Hub. The class label
+    becomes the id prefix (e.g. dog_00042.jpg), so text queries can be scored for
+    retrieval accuracy against ground truth. See evaluate.py."""
+    from datasets import load_dataset
+    model, preprocess = load_clip(args)
+
+    ds = load_dataset(args.hf_dataset, args.hf_config, split=args.hf_split)
+    if args.limit and args.limit < ds.num_rows:
+        ds = ds.shuffle(seed=args.seed).select(range(args.limit))
+    img_col = "image" if "image" in ds.column_names else "img"
+    names = ds.features[args.hf_label_col].names
+
+    images, ids = [], []
+    for i, ex in enumerate(ds):
+        cls = names[ex[args.hf_label_col]].replace(" ", "_")
+        images.append(ex[img_col])
+        ids.append(f"{cls}_{i:05d}.jpg")
+    print(f"embedding {len(images)} images from {args.hf_dataset}:{args.hf_split} "
+          f"across {len(names)} classes ({', '.join(names)})")
+    vectors = encode_images(model, preprocess, images, args.batch)
+    write_parquet(args.out, ids, args.dataset, vectors)
+
+
+def run_real(args):
+    import requests
+    from PIL import Image
+
+    model, preprocess = load_clip(args)
 
     if not os.path.exists(args.urls):
         sys.exit(f"--urls file not found: {args.urls} (or use --synthetic)")
@@ -78,26 +119,19 @@ def run_real(args):
     # Some hosts reject a generic library User-Agent (403), so identify the client.
     headers = {"User-Agent": "petabyte-platform-clip-demo/1.0 (https://github.com/AbhiramDodda/distributed-image-processing-system)"}
 
-    ids, tensors = [], []
+    images, ids = [], []
     for item_id, url in entries:
         try:
             resp = requests.get(url, timeout=20, headers=headers)
             resp.raise_for_status()
-            img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-            tensors.append(preprocess(img))
+            images.append(Image.open(io.BytesIO(resp.content)))
             ids.append(item_id)
         except Exception as e:  # skip a dead URL rather than abort the whole run
             print(f"skip {url}: {e}", file=sys.stderr)
-    if not tensors:
+    if not images:
         sys.exit("no images downloaded; check --urls / network")
 
-    vectors = []
-    with torch.no_grad():
-        for start in range(0, len(tensors), args.batch):
-            batch = torch.stack(tensors[start:start + args.batch])
-            feats = model.encode_image(batch)
-            feats = feats / feats.norm(dim=-1, keepdim=True)
-            vectors.extend(feats.cpu().numpy().astype(np.float32))
+    vectors = encode_images(model, preprocess, images, args.batch)
     write_parquet(args.out, ids, args.dataset, vectors)
 
 
@@ -109,6 +143,12 @@ def main():
     p.add_argument("--count", type=int, default=400, help="synthetic corpus size")
     p.add_argument("--dim", type=int, default=512, help="synthetic vector dimension (real mode uses the model's)")
     p.add_argument("--urls", default="sample_urls.txt", help="real mode: newline-delimited image URLs")
+    p.add_argument("--hf-dataset", default="", help="embed a HuggingFace image dataset (e.g. uoft-cs/cifar10)")
+    p.add_argument("--hf-config", default=None, help="dataset config/subset name")
+    p.add_argument("--hf-split", default="test", help="dataset split")
+    p.add_argument("--hf-label-col", default="label", help="ground-truth label column")
+    p.add_argument("--limit", type=int, default=0, help="cap the number of images (0 = all)")
+    p.add_argument("--seed", type=int, default=42, help="shuffle seed when --limit subsamples")
     p.add_argument("--model", default="ViT-B-32")
     p.add_argument("--pretrained", default="laion2b_s34b_b79k")
     p.add_argument("--batch", type=int, default=32)
@@ -116,6 +156,8 @@ def main():
 
     if args.synthetic:
         run_synthetic(args)
+    elif args.hf_dataset:
+        run_hf(args)
     else:
         run_real(args)
 
