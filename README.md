@@ -327,6 +327,29 @@ The mechanism is size-independent: content-addressed sharding spreads any corpus
 Observed live via `/v1/metrics/tasks` (state counts, `rebalances`, latency percentiles) and
 `/v1/cluster/nodes` (per-worker Active→Suspect→Dead).
 
+#### Test environment
+
+All numbers above were measured on a **single laptop**, not a cluster:
+
+| | |
+| --- | --- |
+| CPU | 13th Gen Intel Core i7-13620H — 10 cores / 16 threads, up to 4.9 GHz |
+| RAM | 13.3 GiB, **no swap** |
+| Disk | 1 TB KIOXIA NVMe SSD (single local disk; MinIO data + metadata DB all here) |
+| GPU | RTX 4060 Laptop present but **unused** — see below |
+| OS / runtime | Arch Linux (kernel 6.19), Go 1.26; MinIO single-node, filesystem backend |
+
+**No GPU is involved.** The coordinator, workers, MinIO, and the scan job are pure
+CPU + local-NVMe I/O; the discrete GPU sits idle (even the separate CLIP eval runs on CPU).
+
+**Peak memory during the 1.28M-object run is small and flat** — coordinator **~21 MB**,
+each worker **~20 MB** (~200 MB for all 10), MinIO **~1.0 GB** (it dominates, holding and
+serving the 1.28M-object bucket): **~1.3 GB total for the whole platform**. The job's memory
+is bounded by shard/lease size, not corpus size, so it does not grow with object count.
+RAM is the real ceiling on this box, which is exactly why the dumper is memory-bounded: the
+old `datasets`-streaming path OOM-killed this same 13.3 GiB machine at ~430k images, whereas
+`dump_parquet_images.py` holds one ~1,000-row batch and stays flat across all 1.28M.
+
 #### Reproduce it
 
 Requires the local demo harness at `~/petabyte-demo` (MinIO + `mc` binaries) and a Python
