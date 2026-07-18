@@ -24,6 +24,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.HandleFunc("/v1/metrics/pending", a.handlePendingMetric)
 	mux.HandleFunc("/v1/metrics/admission", a.handleAdmissionMetric)
+	mux.HandleFunc("/v1/metrics/tasks", a.handleTaskMetric)
 	mux.HandleFunc("/v1/operator/drain", a.handleOperatorDrain)
 	mux.HandleFunc("/v1/cluster/register", a.handleRegister)
 	mux.HandleFunc("/v1/cluster/heartbeat", a.handleHeartbeat)
@@ -54,6 +55,29 @@ func (a *API) handlePendingMetric(w http.ResponseWriter, r *http.Request) {
 		"pending_tasks":            pending,
 		"active_workers":           active,
 		"pending_tasks_per_worker": ratio,
+	})
+}
+
+// handleTaskMetric reports aggregate task state and completed-task latency
+// (percentiles over StartedAt -> FinishedAt), plus the rebalance count that a
+// failure/chaos run drives up. active_workers is included so latency can be read
+// against the surviving capacity.
+func (a *API) handleTaskMetric(w http.ResponseWriter, r *http.Request) {
+	m := a.coord.sched.Metrics()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tasks_total":     m.TasksTotal,
+		"pending":         m.Pending,
+		"assigned":        m.Assigned,
+		"running":         m.Running,
+		"done":            m.Done,
+		"failed":          m.Failed,
+		"rebalances":      m.Rebalances,
+		"active_workers":  len(a.coord.membership.ActiveNodes()),
+		"latency_p50_ms":  m.LatencyP50Ms,
+		"latency_p95_ms":  m.LatencyP95Ms,
+		"latency_p99_ms":  m.LatencyP99Ms,
+		"latency_max_ms":  m.LatencyMaxMs,
+		"latency_mean_ms": m.LatencyMeanMs,
 	})
 }
 

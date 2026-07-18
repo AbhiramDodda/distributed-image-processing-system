@@ -291,6 +291,31 @@ results *can* be a given class). Embedding streams in batches (bounded memory, ~
 10k on CPU). `embed_corpus.py --hf-dataset` (any HF image dataset) and `evaluate.py`
 (precision@k vs. labels) are the reusable pieces.
 
+### Failure resilience (chaos-tested)
+
+The failure story is only worth as much as its evidence, so `scripts/chaos-demo.sh`
+proves it on a real dataset: it ingests the **10,000-image CIFAR-10 test set** as objects
+into MinIO (sharded across all 256 shards), brings up **10 worker nodes**, and runs the
+same job twice — once with every worker healthy, once **`kill -9`-ing 3 of the 10 workers
+mid-flight** (at ~⅓ done). What happens when a third of the fleet dies uncleanly:
+
+- **Zero data lost.** Both runs finish **256/256 tasks, 0 failed**. The phi-accrual detector
+  (tuned to suspect=2s/dead=4s for the demo) marks the silent workers dead, the coordinator's
+  `RebalanceWorker` requeues their in-flight tasks (**24 rebalanced** in the measured run), and
+  the idempotent `FinalResultKey` makes each re-run *overwrite* rather than duplicate or drop —
+  so every shard still completes exactly once.
+- **Latency cost is bounded and explainable.** End-to-end job time went **2.76 s → 6.69 s**
+  (Δ +3.9 s), dominated by the dead-detection window (survivors briefly idle until the failed
+  workers are declared dead) plus whole-shard reprocessing of the interrupted tasks. Per-task
+  latency barely moved (p50 82 → 88 ms); the failure tax is in *detection + requeue*, not
+  steady-state throughput.
+
+This is a correctness-under-failure proof, not a volume benchmark (CIFAR is ~15 MB) — but the
+mechanism is size-independent: content-addressed sharding spreads any corpus across the 256
+shards, work-stealing splits hot shards, and the exactly-once commit + rebalance hold per
+task regardless of total size. Observed live via `/v1/metrics/tasks` (state counts,
+`rebalances`, latency percentiles) and `/v1/cluster/nodes` (per-worker Active→Suspect→Dead).
+
 ## Future Plans
 
 - **Close the exactly-once gap.** Fold the result copy and the done-mark into one replicated
@@ -711,6 +736,7 @@ The operator polls `/v1/operator/drain` on the coordinator to get pending tasks 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/v1/metrics/pending` | `{pending_tasks, active_workers, pending_tasks_per_worker}` |
+| GET | `/v1/metrics/tasks` | Task state counts, `rebalances` (failure-driven requeues), and task-latency percentiles (p50/p95/p99/max/mean over StartedAt→FinishedAt) |
 | GET | `/v1/metrics/admission` | Backpressure load: in-flight, lifetime admitted/rejected, per-tenant (`enabled:false` when unconfigured) |
 | POST | `/v1/operator/drain?n=N` | Atomically drain up to N pending tasks for K8s Job creation |
 
