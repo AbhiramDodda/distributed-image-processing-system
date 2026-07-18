@@ -29,14 +29,20 @@ import pyarrow.parquet as pq
 
 
 def write_parquet(path, ids, dataset, vectors):
+    # Build the vector column straight from a contiguous (N, dim) float32 buffer via
+    # ListArray offsets -- avoids materialising N python lists (cheap and low-memory
+    # even for large corpora). Go's reader recovers dim from the per-row width.
+    arr = np.ascontiguousarray(np.stack(vectors), dtype=np.float32)
+    n, dim = arr.shape
+    flat = pa.array(arr.reshape(-1))
+    offsets = pa.array(np.arange(0, (n + 1) * dim, dim, dtype=np.int32))
     table = pa.table({
         "id": pa.array(ids, pa.string()),
-        "dataset": pa.array([dataset] * len(ids), pa.string()),
-        # Variable list of float32 -- Go's reader recovers dim from the row width.
-        "vector": pa.array([v.tolist() for v in vectors], pa.list_(pa.float32())),
+        "dataset": pa.array([dataset] * n, pa.string()),
+        "vector": pa.ListArray.from_arrays(offsets, flat),
     })
     pq.write_table(table, path)
-    print(f"wrote {len(ids)} embeddings (dim={len(vectors[0])}) -> {path}")
+    print(f"wrote {n} embeddings (dim={dim}) -> {path}")
 
 
 def run_synthetic(args):
@@ -57,17 +63,35 @@ def load_clip(args):
     return model, preprocess
 
 
-def encode_images(model, preprocess, images, batch):
-    """Run the CLIP image encoder over PIL images, L2-normalised, in batches."""
+def encode_stream(model, preprocess, items, batch):
+    """Encode (id, PIL.Image) pairs with the CLIP image encoder, L2-normalised, in
+    batches. Only `batch` preprocessed image tensors are ever resident at once -- the
+    tensors (3x224x224 floats) are the memory cost, not the tiny output vectors -- so
+    this streams cleanly over datasets far larger than RAM. Returns (ids, vectors)."""
     import torch
-    tensors = [preprocess(im.convert("RGB")) for im in images]
-    vectors = []
-    with torch.no_grad():
-        for start in range(0, len(tensors), batch):
-            feats = model.encode_image(torch.stack(tensors[start:start + batch]))
+    ids, vectors = [], []
+    buf_ids, buf_t = [], []
+
+    def flush():
+        if not buf_t:
+            return
+        with torch.no_grad():
+            feats = model.encode_image(torch.stack(buf_t))
             feats = feats / feats.norm(dim=-1, keepdim=True)
             vectors.extend(feats.cpu().numpy().astype(np.float32))
-    return vectors
+        ids.extend(buf_ids)
+        buf_ids.clear()
+        buf_t.clear()
+
+    for item_id, im in items:
+        buf_ids.append(item_id)
+        buf_t.append(preprocess(im.convert("RGB")))
+        if len(buf_t) >= batch:
+            flush()
+            if len(ids) % 1000 < batch:
+                print(f"  encoded {len(ids)} images...", file=sys.stderr, flush=True)
+    flush()
+    return ids, vectors
 
 
 def run_hf(args):
@@ -82,15 +106,17 @@ def run_hf(args):
         ds = ds.shuffle(seed=args.seed).select(range(args.limit))
     img_col = "image" if "image" in ds.column_names else "img"
     names = ds.features[args.hf_label_col].names
-
-    images, ids = [], []
-    for i, ex in enumerate(ds):
-        cls = names[ex[args.hf_label_col]].replace(" ", "_")
-        images.append(ex[img_col])
-        ids.append(f"{cls}_{i:05d}.jpg")
-    print(f"embedding {len(images)} images from {args.hf_dataset}:{args.hf_split} "
+    print(f"embedding {ds.num_rows} images from {args.hf_dataset}:{args.hf_split} "
           f"across {len(names)} classes ({', '.join(names)})")
-    vectors = encode_images(model, preprocess, images, args.batch)
+
+    # Stream (id, image) pairs so HF decodes one example at a time -- never the whole
+    # split into memory at once (the 10k-image OOM was building the full tensor list).
+    def items():
+        for i, ex in enumerate(ds):
+            cls = names[ex[args.hf_label_col]].replace(" ", "_")
+            yield f"{cls}_{i:05d}.jpg", ex[img_col]
+
+    ids, vectors = encode_stream(model, preprocess, items(), args.batch)
     write_parquet(args.out, ids, args.dataset, vectors)
 
 
@@ -119,19 +145,18 @@ def run_real(args):
     # Some hosts reject a generic library User-Agent (403), so identify the client.
     headers = {"User-Agent": "petabyte-platform-clip-demo/1.0 (https://github.com/AbhiramDodda/distributed-image-processing-system)"}
 
-    images, ids = [], []
-    for item_id, url in entries:
-        try:
-            resp = requests.get(url, timeout=20, headers=headers)
-            resp.raise_for_status()
-            images.append(Image.open(io.BytesIO(resp.content)))
-            ids.append(item_id)
-        except Exception as e:  # skip a dead URL rather than abort the whole run
-            print(f"skip {url}: {e}", file=sys.stderr)
-    if not images:
-        sys.exit("no images downloaded; check --urls / network")
+    def items():
+        for item_id, url in entries:
+            try:
+                resp = requests.get(url, timeout=20, headers=headers)
+                resp.raise_for_status()
+                yield item_id, Image.open(io.BytesIO(resp.content))
+            except Exception as e:  # skip a dead URL rather than abort the whole run
+                print(f"skip {url}: {e}", file=sys.stderr)
 
-    vectors = encode_images(model, preprocess, images, args.batch)
+    ids, vectors = encode_stream(model, preprocess, items(), args.batch)
+    if not ids:
+        sys.exit("no images downloaded; check --urls / network")
     write_parquet(args.out, ids, args.dataset, vectors)
 
 

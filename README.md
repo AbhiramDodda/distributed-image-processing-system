@@ -282,12 +282,14 @@ ordering/tie-break/normalisation-invariance, Parquet round-trip, encoder client)
 **Scored on a real dataset (`scripts/clip-eval-demo.sh`).** Beyond a handful of images, this
 downloads a labelled HuggingFace image dataset, embeds it with real CLIP, and measures
 text→image retrieval accuracy *through the Go engine* against ground truth — a quantitative
-number, not a cherry-picked demo. On **2,000 CIFAR-10 test images across 10 classes** (random
-baseline 10%), every class query (`"a photo of a <class>"`) scored **100% precision@10 and
-100% top-1**, degrading gracefully as `k` grows past the ~200 images-per-class supply
-(P@25 99.2% → P@50 98.4% → P@100 97.1% → P@150 94.3%) — the expected curve, computed by
-`cmd/vsearch → CLIP sidecar → Go k-NN`. `embed_corpus.py --hf-dataset` (any HF image dataset)
-and `evaluate.py` (precision@k vs. labels) are the reusable pieces.
+number, not a cherry-picked demo. On the **full 10,000-image CIFAR-10 test set across 10
+classes** (1,000 each, random baseline 10%), every class query (`"a photo of a <class>"`)
+scored **100% precision@10 and 100% top-1**. Pushing `k` traces the expected curve, computed
+by `cmd/vsearch → CLIP sidecar → Go k-NN`: P@100 98.7% → P@500 96.7% → P@1000 86.7% (asking
+for exactly the per-class count) → P@2000 49.1% (≈ the 50% ceiling — only 1,000 of any 2,000
+results *can* be a given class). Embedding streams in batches (bounded memory, ~1.5 GB for
+10k on CPU). `embed_corpus.py --hf-dataset` (any HF image dataset) and `evaluate.py`
+(precision@k vs. labels) are the reusable pieces.
 
 ## Future Plans
 
