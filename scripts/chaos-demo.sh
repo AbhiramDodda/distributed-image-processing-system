@@ -26,9 +26,20 @@ COUNT="${COUNT:-16000}"        # images spread uniformly across all 256 shards
 DIM="${DIM:-64}"
 WORKERS="${WORKERS:-10}"
 KILL="${KILL:-3}"              # workers to kill mid-chaos-run
+CONCURRENCY="${CONCURRENCY:-8}"    # parallel tasks per worker (I/O parallelism)
+# lease_chunk bounds work-stealing granularity. For a UNIFORM corpus (all 256
+# shards ~equal) stealing has no straggler to help and just fragments big shards
+# into micro-tasks that each re-list their shard -> quadratic listing. Set it
+# above the largest shard so every shard is granted whole and nothing splits.
+# (Drop it back to ~1000 to *exercise* stealing on a deliberately skewed corpus.)
+LEASE_CHUNK="${LEASE_CHUNK:-100000}"
 # A dedicated, uniform dataset so every shard-task is comparable -- keeps the
 # latency numbers clean and isolated from other demos' data.
 DATASET="${DATASET:-chaos}"
+# SKIP_INGEST=1 reuses whatever is already in MinIO for $DATASET and jumps straight
+# to the job/chaos phase -- lets you re-run the test without re-ingesting a huge
+# corpus (a 1.28M-object ingest takes ~1.5h; the objects persist in minio-data).
+SKIP_INGEST="${SKIP_INGEST:-}"
 COORD_URL="http://localhost:8090"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -75,8 +86,13 @@ logging: {level: warn, format: text}
 YAML
 # Corpus: ingest a real image directory (INGEST_DIR, e.g. dumped CIFAR-10) if given,
 # otherwise generate a synthetic set. Either way the filenames shard across all 256.
-have=$("$MC" ls --recursive "local/petabyte-images/$DATASET/" 2>/dev/null | wc -l)
-if [ "${INGEST_DIR:-}" != "" ]; then
+have=0
+if [ -z "$SKIP_INGEST" ]; then
+  have=$("$MC" ls --recursive "local/petabyte-images/$DATASET/" 2>/dev/null | wc -l)
+fi
+if [ -n "$SKIP_INGEST" ]; then
+  say "SKIP_INGEST set -- reusing existing '$DATASET' objects in MinIO"
+elif [ "${INGEST_DIR:-}" != "" ]; then
   want=$(find "$INGEST_DIR" -type f | wc -l)
   if [ "$have" -lt "$want" ]; then
     say "ingesting $want real images from $INGEST_DIR into dataset '$DATASET'"
@@ -105,6 +121,7 @@ coordinator:
   heartbeat_interval: 1s
   dispatch_interval: 100ms
   task_max_retries: 3
+  lease_chunk: $LEASE_CHUNK
   wal_dir: "$RUN/coordinator-wal"
 metrics: {enabled: false}
 logging: {level: info, format: text}
@@ -117,7 +134,7 @@ for _ in $(seq 1 50); do curl -sf -o /dev/null "$COORD_URL/v1/metrics/pending" 2
 # --- start N workers ---------------------------------------------------------
 cat >"$RUN/worker.yaml" <<YAML
 storage: {endpoint: "http://localhost:9000", region: us-east-1, bucket: petabyte-images, access_key_id: minioadmin, secret_access_key: minioadmin, use_path_style: true}
-worker: {coordinator_url: "$COORD_URL", host: 0.0.0.0, port: 0, concurrency: 1, poll_interval: 100ms, heartbeat_interval: 1s}
+worker: {coordinator_url: "$COORD_URL", host: 0.0.0.0, port: 0, concurrency: $CONCURRENCY, poll_interval: 100ms, heartbeat_interval: 1s}
 logging: {level: warn, format: text}
 YAML
 say "starting $WORKERS workers"
@@ -141,7 +158,7 @@ submit_job() {
 # poll until done_tasks+failed_tasks == total_tasks; echo "done failed total"
 wait_job() {
   local id="$1" resp
-  for _ in $(seq 1 3000); do
+  for _ in $(seq 1 9000); do
     resp=$(curl -sf "$COORD_URL/v1/jobs/$id" || true)
     local st; st=$(jstr "$resp" status)
     if [ "$st" = "completed" ] || [ "$st" = "failed" ]; then
@@ -169,7 +186,7 @@ JOB2=$(submit_job)
 t0=$(now_ms)
 threshold=$(( tot1 / 3 ))
 killed=""
-for _ in $(seq 1 3000); do
+for _ in $(seq 1 9000); do
   resp=$(curl -sf "$COORD_URL/v1/jobs/$JOB2" || true)
   done=$(jget "$resp" done_tasks); done=${done:-0}
   st=$(jstr "$resp" status)

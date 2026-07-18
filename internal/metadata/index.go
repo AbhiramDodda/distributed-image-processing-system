@@ -39,8 +39,10 @@ func Open(path string) (*Index, error) {
 	// modernc.org/sqlite uses _pragma=NAME(VALUE) query params. The mattn-style
 	// _journal_mode=/_busy_timeout= params are silently ignored by this driver,
 	// which left WAL off and busy_timeout at 0 -> concurrent writers got instant
-	// SQLITE_BUSY instead of waiting.
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	// SQLITE_BUSY instead of waiting. busy_timeout is 30s so a bulk ingest of
+	// millions of objects rides out sustained write contention rather than
+	// dropping the occasional row.
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}

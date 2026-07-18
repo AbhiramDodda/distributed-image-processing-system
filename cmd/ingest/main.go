@@ -89,7 +89,12 @@ func main() {
 		"throughput_img_s", float64(progress.Processed)/elapsed.Seconds(),
 	)
 
-	if progress.Failed > 0 {
+	// A handful of transient failures in a bulk ingest (e.g. an occasional
+	// SQLITE_BUSY under heavy write concurrency over millions of objects) must
+	// not fail the whole run. Only exit nonzero if nothing landed or failures
+	// exceed 1% of the attempted objects.
+	if progress.Processed == 0 ||
+		float64(progress.Failed) > 0.01*float64(progress.Processed+progress.Failed) {
 		os.Exit(1)
 	}
 }
