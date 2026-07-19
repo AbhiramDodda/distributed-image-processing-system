@@ -17,7 +17,11 @@ type vnode struct {
 
 // Ring is a consistent hash ring with virtual nodes.
 // Adding/removing one node remaps ~1/N keys instead of ~(N-1)/N.
-// With 150 vnodes per node, distribution variance is ~±5%.
+// With 150 vnodes per node, per-node load has a coefficient of variation of
+// ~1/sqrt(150) ~= 8%, so the peak deviation from an even split is roughly
+// 10% (few nodes) to 25% (dozens of nodes) -- not the tighter spread a naive
+// reading of "virtual nodes smooth the distribution" might suggest. Raise the
+// vnode count (~600/node) if a ~5% peak is actually required.
 type Ring struct {
 	mu sync.RWMutex
 	vnodes []vnode

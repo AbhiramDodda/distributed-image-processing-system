@@ -10,7 +10,7 @@ worker:
   id: ""           # leave empty to auto-generate UUID
   coordinator_url: "http://localhost:8090"
   host: "0.0.0.0"
-  port: 9001
+  port: 9101           # 9001 is MinIO's console; workers start at 9101+
   concurrency: 4
   poll_interval: 2s
   heartbeat_interval: 5s
