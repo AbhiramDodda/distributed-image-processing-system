@@ -68,7 +68,8 @@ func TestRing_distribution_variance(t *testing.T) {
 		hits[node]++
 	}
 	expected := samples / len(nodes)
-	// 150 vnodes gives ~±5% variance; allow ±10% in tests
+	// 150 vnodes over 3 nodes keeps peak deviation under ~10% (it grows to
+	// ~20-25% at dozens of nodes -- see the coefficient-of-variation note on Ring).
 	tolerance := expected / 10
 	for _, n := range nodes {
 		diff := hits[n] - expected

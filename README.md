@@ -50,7 +50,7 @@ Multiple researchers submit algorithms that run simultaneously against the same 
 
 ### Level 2 - Distributed Systems (complete)
 
-- Consistent hash ring with 150 virtual nodes per physical node (~+/-5% variance)
+- Consistent hash ring with 150 virtual nodes per physical node (~8% per-node load std-dev; ~10-25% peak deviation depending on cluster size)
 - Two-stage failure detector: Active -> Suspect (10s) -> Dead (20s), recovery on any heartbeat
 - AP design (CAP theorem): workers keep processing during a partition; duplicate task execution is acceptable and deduplicated by output key
 - Job scheduler: submit jobs, one task per shard, ring-based locality preference, automatic rebalancing when a worker dies
@@ -460,7 +460,7 @@ MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
 ```
 
 > **Port note:** the MinIO console binds `:9001`. Do **not** run a worker on 9001 — use
-> 9101+ (see the walkthrough). The default `configs/worker.yaml` uses 9001, which collides.
+> 9101+ (see the walkthrough). `configs/worker.yaml` now defaults to 9101 to avoid the collision.
 
 ## Build
 
@@ -543,7 +543,7 @@ go test ./internal/perf/ -run TestPerfReport -v      # latency percentiles + thr
 go test ./internal/perf/ -bench=. -benchmem -run=^$  # ns/op, B/op, allocs/op
 ```
 
-Environment: 13th Gen Intel Core i7-13620H (16 threads), Go 1.25, Linux.
+Environment: 13th Gen Intel Core i7-13620H (16 threads), Go 1.26, Linux.
 
 ### Latency percentiles and throughput
 
@@ -598,7 +598,7 @@ reflects SHA-256 prefix distribution.
 DSN params (`?_journal_mode=WAL&_busy_timeout=5000`), which the actual driver
 (`modernc.org/sqlite`) silently ignores -- so WAL was off and `busy_timeout` was 0, and
 the 16-worker ingest hit instant `SQLITE_BUSY` (only 4 of the first 50 index rows
-survived; objects still uploaded fine). Fixed to the driver's `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)`
+survived; objects still uploaded fine). Fixed to the driver's `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)`
 form; the 44,000-insert run then completed with zero failures.
 
 ## Quick Start
@@ -618,8 +618,8 @@ bin/coordinator -config configs/coordinator.yaml
 Start two workers (different ports):
 
 ```sh
-bin/worker -config configs/worker.yaml -id worker-1 -port 9001
-bin/worker -config configs/worker.yaml -id worker-2 -port 9002
+bin/worker -config configs/worker.yaml -id worker-1 -port 9101
+bin/worker -config configs/worker.yaml -id worker-2 -port 9102
 ```
 
 ## Ingesting Images
