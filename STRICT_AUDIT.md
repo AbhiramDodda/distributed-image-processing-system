@@ -163,6 +163,45 @@ used to commit: the scheduler recomputes the authoritative `finalKey` from curre
 `StagingResultKey`. Harmless today, but it invites a future reader to believe the worker
 chooses the final key. **Fix:** drop the field or compute it from live state.
 
+### F7 — **At 1M objects/shard, up-front full-shard listing defeats work-stealing**  · Severity: **Medium** (scale limitation, measured)
+Found by re-running `steal-demo.sh` at **`COUNT=1,000,000` in a single shard** (the run this
+audit was asked to do). Timeline from the live logs:
+- Ingest: 1,000,000 objects, 0 failed, but **62m58s @ 264 img/s** (SQLite single-writer +
+  local MinIO fs backend are the ceiling — consistent with the README's own disclosure).
+- Job phase: w0 logged `task started` then **nothing for ~2 min**; w1 registered but **never
+  got a task — zero steals**; coordinator `high_water_seq` never advanced; no "stole task tail".
+
+**Root cause (measured):** `worker.runAlgorithm` calls `store.ListPrefix(shard)` to enumerate
+**every object in the shard before it processes or renews anything**, and `ListPrefix`
+paginates at 1000 keys/call — so a 1M-object shard is **~1000 serial S3 round-trips
+accumulated into one in-memory `[]string`**. Directly measured: **listing shard `7a`
+(1M objects) takes 135 s** (`mc ls | wc -l`), longer than the demo's own 120 s wait loop.
+Because the shard size (`Total`) is only reported on the **first renewal — which happens
+after the list** — `RangeEnd` stayed `-1`, the task **never became splittable**, and the idle
+worker could never steal. The exact intra-shard tail-latency problem work-stealing exists to
+fix is **reintroduced at 1M/shard by the listing step**, and the whole-shard case gets no
+parallelism at all until the 135 s list completes.
+
+Two consequences:
+1. **Splittability is gated on a slow, up-front, whole-shard listing.** Below ~tens of
+   thousands of objects (6k lists in <1 s) this is invisible; at 1M it dominates.
+2. **Per-worker memory is bounded by shard object count, not lease size.** Each worker (and
+   each work-stealing *sub-task*) holds the full ~1M-key list (~70 MB of strings). This
+   qualifies the README's "the job's memory is bounded by shard/lease size, not corpus size"
+   — true across *shards*, but a single skewed 1M-object shard makes the per-task key list
+   large regardless of `lease_chunk`.
+
+This does **not** break correctness — exactly-once tiling is size-independent and was never
+violated; it simply never engaged because no steal occurred. It **extends the README's own
+disclosed limitation** ("work-stealing is naive … quadratic re-listing unless `lease_chunk`
+is hand-tuned"): with the steal-demo's default `lease_chunk=200`, had splitting engaged,
+each of ~5000 sub-tasks would re-list 1M keys (135 s each) — quadratic blow-up, exactly as
+warned. **Recommendations:** (a) report `Total` from the metadata index's shard count instead
+of a full object listing so splittability is immediate; (b) stream/paginate the shard listing
+lazily by offset rather than materializing all keys; (c) size `lease_chunk` from the shard's
+object count. All three are architectural, not one-line fixes — out of scope for the F1–F4
+doc/config fixes in this branch.
+
 ### F6 — **Exactly-once residual gap** (already disclosed) · Severity: **Informational**
 The README honestly states (lines 397-399, Future Plans) that the result-copy and done-mark
 are not one atomic replicated log entry, so a coordinator crash in a narrow window can
@@ -175,10 +214,17 @@ which they are. **No action; noted for completeness.**
 
 ---
 
-## 4. What was NOT reproduced (scope honesty)
+## 4. Scale runs & what was NOT reproduced (scope honesty)
+- **1M-object single-shard steal run: DONE** (`COUNT=1000000`). Ingest succeeded
+  (1,000,000 / 0 failed, 63 min) but the work-stealing phase **did not complete** — see
+  **F7**: the 135 s up-front shard listing gated splittability, so no steal engaged inside
+  the window. Correctness was not contradicted (no steal ⇒ nothing to tile incorrectly); the
+  finding is a *scale/latency* limitation, which is the value of having run it at 1M.
 - **1.28M-object ImageNet chaos run** (~1.5 h ingest): not re-run. The *mechanism* is
   identical to the 16k chaos run I did verify live, and the README is explicit that this
-  proves object-count scaling, not petabyte byte-throughput.
+  proves object-count scaling, not petabyte byte-throughput. (The chaos demo spreads objects
+  across all 256 shards, so at 1M that is ~4k/shard — it would *not* have hit F7, which is a
+  single-large-shard effect.)
 - **CLIP eval accuracy numbers** (P@k on CIFAR-10): needs a Torch/HuggingFace download and
   GPU-less CPU embedding; not run. The Go-side `internal/vsearch` k-NN tests pass under
   `-race`.
@@ -191,13 +237,23 @@ which they are. **No action; noted for completeness.**
 ---
 
 ## 5. Verdict
-No data races, no deadlocks, no lock-order cycles, and no work-stealing safety violation
-could be provoked — including by an adversarial property test and two live end-to-end
-demos against real MinIO. The distributed correctness core is **sound and honestly
-documented**. The actionable defects are **one inaccurate quantitative claim (F1, ring
-variance)** and **four low-severity documentation/config nits (F2–F5)**. Fixing F1's wording
-and F4's default config would remove the only two items a careful reader could call
-misleading.
+No data races, no deadlocks, no lock-order cycles, and no work-stealing **safety** violation
+could be provoked — including by an adversarial property test and live end-to-end demos
+against real MinIO. The distributed correctness *core is sound and honestly documented.*
+
+Actionable defects, by severity:
+- **Medium:** **F1** — the "~±5% ring variance" claim is quantitatively false (measured
+  ~9–24% peak); **F7** — at 1M objects in a single shard, the up-front 135 s full-shard
+  listing gates splittability and **defeats work-stealing in practice** (idle worker never
+  steals), plus per-worker memory holds the full shard key list. F7 is a scale/latency
+  limitation, not a correctness bug, and extends a limitation the README already discloses.
+- **Low:** **F2–F4** — documentation/config drift (busy_timeout value, Go version, default
+  worker port). **F5** — a cosmetic unused key computation. **F6** — informational (the
+  exactly-once residual gap, disclosed and accurate).
+
+F1–F4 are fixed on branch `audit-fixes-f1-f4`. F7 needs an architectural change (report shard
+size from the metadata index instead of a full listing; lazily paginate the shard by offset;
+size `lease_chunk` from the shard count) and is left as a documented recommendation.
 
 ---
 
