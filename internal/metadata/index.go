@@ -72,6 +72,48 @@ func (idx *Index) Insert(ctx context.Context, r DataRecord) error {
 	return nil
 }
 
+// InsertBatch writes many records inside a single transaction with one prepared
+// statement, so the SQLite writer takes its lock and fsyncs once per batch instead
+// of once per row. Ingest funnels every record through one writer goroutine calling
+// this, which is what removed the per-file single-writer lock-wait that phase
+// instrumentation measured at ~91% of ingest time. The whole batch commits or rolls
+// back together.
+func (idx *Index) InsertBatch(ctx context.Context, recs []DataRecord) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	tx, err := idx.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin batch: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR REPLACE INTO records
+		(id, filename, s3_key, shard, dataset, size_bytes, checksum, labels, meta, tier, version, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("prepare batch: %w", err)
+	}
+	defer stmt.Close()
+	for _, r := range recs {
+		labels, _ := json.Marshal(r.Labels)
+		meta, _ := json.Marshal(r.Meta)
+		_, err := stmt.ExecContext(ctx,
+			r.ID, r.Filename, r.S3Key, r.Shard, r.Dataset,
+			r.SizeBytes, r.Checksum, string(labels), string(meta),
+			string(r.Tier), r.Version, r.IndexedAt.UTC(),
+		)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("batch exec: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit batch: %w", err)
+	}
+	return nil
+}
+
 // GetShardManifest returns all records for a shard+dataset pair.
 // This is called once per worker at job start — O(log n) index lookup.
 func (idx *Index) GetShardManifest(ctx context.Context, shard, dataset string) (*ShardManifest, error) {

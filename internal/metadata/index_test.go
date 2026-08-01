@@ -330,3 +330,45 @@ func TestIndex_insertIsDurable(t *testing.T) {
 		t.Errorf("after reopen: manifest count = %d, want 1", m.Count)
 	}
 }
+
+func TestIndex_insertBatch(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+
+	// Two shards in one batch; all must land in a single committed transaction.
+	batch := []metadata.DataRecord{
+		makeRecord("b1", "cat001.jpg", "a3", "train", storage.TierHot, 0),
+		makeRecord("b2", "cat002.jpg", "a3", "train", storage.TierHot, 0),
+		makeRecord("b3", "dog001.jpg", "f0", "train", storage.TierHot, 0),
+	}
+	if err := idx.InsertBatch(ctx, batch); err != nil {
+		t.Fatalf("InsertBatch: %v", err)
+	}
+
+	m, err := idx.GetShardManifest(ctx, "a3", "train")
+	if err != nil {
+		t.Fatalf("GetShardManifest: %v", err)
+	}
+	if m.Count != 2 {
+		t.Errorf("shard a3 count = %d, want 2", m.Count)
+	}
+
+	// Re-inserting the same ids (INSERT OR REPLACE) must not duplicate rows.
+	if err := idx.InsertBatch(ctx, batch); err != nil {
+		t.Fatalf("InsertBatch (replace): %v", err)
+	}
+	stats, err := idx.DatasetStats(ctx, "train")
+	if err != nil {
+		t.Fatalf("DatasetStats: %v", err)
+	}
+	if stats.TotalImages != 3 {
+		t.Errorf("total images = %d, want 3 (replace, not duplicate)", stats.TotalImages)
+	}
+}
+
+func TestIndex_insertBatch_emptyIsNoop(t *testing.T) {
+	idx := openTestIndex(t)
+	if err := idx.InsertBatch(context.Background(), nil); err != nil {
+		t.Fatalf("InsertBatch(nil): %v", err)
+	}
+}

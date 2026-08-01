@@ -71,6 +71,7 @@ func main() {
 		cfg.Storage.MultipartChunkSize,
 		cfg.Storage.MultipartConcurrency,
 	)
+	pipeline.WithBatchSize(cfg.Ingestion.BatchSize)
 
 	log.Info("ingestion started", "dir", *dir, "dataset", *dataset, "workers", cfg.Ingestion.Workers)
 	start := time.Now()
