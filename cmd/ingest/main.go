@@ -89,6 +89,28 @@ func main() {
 		"throughput_img_s", float64(progress.Processed)/elapsed.Seconds(),
 	)
 
+	// Where the aggregate worker-busy time actually went. These are summed across
+	// all workers so they exceed wall-clock elapsed; the shares are what matter --
+	// they show whether the ingest is S3-bound, local-IO/CPU-bound (checksum) or
+	// DB-write-bound, which is the difference between "batch the SQLite inserts"
+	// and "this needs Postgres" being the right next move.
+	phaseTotal := progress.OpenNanos + progress.ChecksumNanos + progress.UploadNanos + progress.IndexNanos
+	share := func(n int64) string {
+		if phaseTotal == 0 {
+			return "0.0%"
+		}
+		return fmt.Sprintf("%.1f%%", 100*float64(n)/float64(phaseTotal))
+	}
+	log.Info("ingestion phase breakdown",
+		"open_stat", share(progress.OpenNanos),
+		"checksum_read", share(progress.ChecksumNanos),
+		"s3_upload", share(progress.UploadNanos),
+		"db_insert", share(progress.IndexNanos),
+		"checksum_total", time.Duration(progress.ChecksumNanos),
+		"s3_upload_total", time.Duration(progress.UploadNanos),
+		"db_insert_total", time.Duration(progress.IndexNanos),
+	)
+
 	// A handful of transient failures in a bulk ingest (e.g. an occasional
 	// SQLITE_BUSY under heavy write concurrency over millions of objects) must
 	// not fail the whole run. Only exit nonzero if nothing landed or failures
