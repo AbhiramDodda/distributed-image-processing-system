@@ -116,7 +116,7 @@ func SideEffectKey(jobID, shard string, rng Range) string {
 // bytes — never a partial read. Generation-scoped staging becomes necessary only
 // once work-stealing splits a shard across workers (differentiation item #2).
 func StagingResultKey(jobID, taskID string) string {
-	return fmt.Sprintf("staging/%s/%s.json", jobID, taskID)
+	return fmt.Sprintf("staging/%s/%s.parquet", jobID, taskID)
 }
 
 // Range identifies the slice of a shard a (sub-)task covers, for naming its
@@ -129,14 +129,14 @@ type Range struct {
 }
 
 // FinalResultKey is a (sub-)task's canonical output location. A whole-shard task
-// (never split) keeps the flat key results/{job}/{shard}.json, so jobs that
-// never split are byte-for-byte unchanged and re-committing overwrites one
-// object per shard. A split task encodes its range so a shard's pieces occupy
+// (never split) keeps the flat key results/{job}/{shard}.parquet, so jobs that
+// never split write one result object per shard and re-committing overwrites it.
+// A split task encodes its range so a shard's pieces occupy
 // distinct, still-deterministic keys — re-committing a given sub-range remains
 // idempotent, and the ranges tile the shard exactly once.
 func FinalResultKey(jobID, shard string, rng Range) string {
 	if !rng.Split {
-		return fmt.Sprintf("results/%s/%s.json", jobID, shard)
+		return fmt.Sprintf("results/%s/%s.parquet", jobID, shard)
 	}
-	return fmt.Sprintf("results/%s/%s/%012d-%012d.json", jobID, shard, rng.Start, rng.End)
+	return fmt.Sprintf("results/%s/%s/%012d-%012d.parquet", jobID, shard, rng.Start, rng.End)
 }

@@ -15,15 +15,26 @@ import (
 
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/formats"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
 )
+
+// objectStore is the slice of storage.Client the worker's algorithm loop needs:
+// list a shard's keys, read its objects, and stage the result. Narrowed to an
+// interface so the staging path is testable without a live object store;
+// *storage.Client satisfies it.
+type objectStore interface {
+	ListPrefix(ctx context.Context, prefix string) ([]string, error)
+	Get(ctx context.Context, key string) (io.ReadCloser, int64, error)
+	Put(ctx context.Context, key string, r io.Reader, contentType string) error
+}
 
 type Worker struct {
 	id string
 	cfg *config.Config
 	log *slog.Logger
-	store *storage.Client
+	store objectStore
 	coordinator string
 	sem chan struct{}
 	activeTasks map[string]*scheduler.Task
@@ -259,19 +270,26 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 	processed := i - start
 
 	stagingKey := scheduler.StagingResultKey(a.JobID, a.TaskID)
-	result := scheduler.TaskResult{
+	finalKey := scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split})
+
+	// Stage the result summary as a single-row Parquet file. The scheduler
+	// promotes this staged object verbatim to finalKey on commit (a server-side
+	// copy), so these bytes ARE the canonical result -- writing them columnar
+	// makes the committed results/ tree directly queryable by Athena / DuckDB /
+	// Spark with no load step. JobID and WorkerID are deliberately omitted: the
+	// job is already encoded in the key path, and the winning attempt's worker is
+	// not a property of the committed result. See formats.WriteResultsParquet.
+	var body bytes.Buffer
+	if err := formats.WriteResultsParquet(&body, []formats.ResultRow{{
 		TaskID: a.TaskID,
-		JobID: a.JobID,
-		WorkerID: w.id,
+		Shard: a.Shard,
+		OutputKey: finalKey,
 		ImagesProcessed: processed,
 		BytesRead: totalBytes,
-		OutputKey: scheduler.FinalResultKey(a.JobID, a.Shard, scheduler.Range{Start: a.RangeStart, End: a.RangeEnd, Split: a.Split}),
+	}}); err != nil {
+		return 0, 0, "", fmt.Errorf("encode result parquet: %w", err)
 	}
-	body, err := json.Marshal(result)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("marshal result: %w", err)
-	}
-	if err := w.store.Put(ctx, stagingKey, bytes.NewReader(body), "application/json"); err != nil {
+	if err := w.store.Put(ctx, stagingKey, bytes.NewReader(body.Bytes()), "application/vnd.apache.parquet"); err != nil {
 		return 0, 0, "", fmt.Errorf("stage result %s: %w", stagingKey, err)
 	}
 	return processed, totalBytes, stagingKey, nil
