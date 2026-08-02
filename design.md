@@ -26,6 +26,7 @@ was chosen and why).
   - [3.2 Work stealing via bounded-grant leases](#32-work-stealing-via-bounded-grant-leases)
   - [3.3 Backpressure by load shedding](#33-backpressure-by-load-shedding)
   - [3.4 Runtime concurrency diagnostics](#34-runtime-concurrency-diagnostics)
+  - [3.5 Causal event tracing across the boundary](#35-causal-event-tracing-across-the-boundary)
 - [4. Durability & availability](#4-durability--availability)
   - [4.1 WAL + checkpoint for coordinator state](#41-wal--checkpoint-for-coordinator-state)
   - [4.2 Raft for coordinator HA](#42-raft-for-coordinator-ha)
@@ -474,6 +475,61 @@ generation monotonicity), and `/debug/diag` exposes lock stats, violations, and 
 goroutine dump. Off by default: one atomic load per lock op, nothing for asserts.
 The explicit scope boundary — it catches *logical* races and *deadlocks*, not
 *data* races — is stated so it is never mistaken for a substitute for `-race`.
+
+### 3.5 Causal event tracing across the boundary
+
+**Context.** `diag` catches a bug the moment it fires; it does not explain *how a
+unit of work got there*. The scheduler's hardest questions are causal and span
+processes: **why did this task run twice?** A task is assigned, its lease is
+extended a chunk at a time, its untouched tail is stolen into a child sub-task, it
+is retried after a failure, it is committed — and the interesting incidents (a
+duplicate, a re-execution) are the product of that history playing out across the
+coordinator and one or more workers. Ordinary per-process logs record what each
+side did, not the causal chain that joins them.
+
+**Alternatives.**
+
+- **Correlate by grepping logs on a shared request ID.**
+  - Pros: no new machinery.
+  - Cons: the ID has to be threaded everywhere and kept consistent; reconstructing
+    a steal/retry lineage by hand across two processes' logs is exactly the manual
+    work that fails under pressure.
+- **A full distributed-tracing vendor (OTel + collector + backend).**
+  - Pros: rich spans, sampling, dashboards, cross-service joins for free.
+  - Cons: a heavyweight dependency and a running collector for what is, here, a
+    two-role system; propagating a `traceparent` still means touching both the
+    gRPC and HTTP transports and the sandbox boundary.
+- **Propagate a trace ID over the wire on every RPC.**
+  - Pros: the standard approach; unambiguous identity.
+  - Cons: a proto/field change on `TaskAssignment` and header plumbing through two
+    transports — surface area that has to stay correct on every path.
+
+**Decision.** A small, **opt-in** `internal/trace` layer whose correlation handle
+is **derived from work identity, not propagated**. `trace.TraceID(jobID, shard,
+start, end)` hashes the canonical `(job, shard, range)` triple, so the coordinator
+and the worker each compute the **same** id from fields the assignment already
+carries — **no proto change, no header plumbing**. It is the same
+attempt-independent identity that makes `FinalResultKey` and `SideEffectKey`
+idempotent ([3.1](#31-exactly-once-via-two-phase-staging-commit)), reused as a
+join key. A per-attempt span is `(TaskID, Generation, WorkerID)`; a causal
+**Parent** links a stolen child to its victim and a retry to its predecessor —
+links the scheduler already knows because it performs the steal and the requeue.
+
+The scheduler emits `assigned`, `chunk_granted`, `stolen` (carrying the victim's
+newly-bumped generation), `retry`, `failed`, and `committed`; the worker emits
+`worker_recv` and `staged` tagged with the locally-computed `TraceID`; the sandbox
+exposes it to untrusted algorithm code as `PETABYTE_TRACE_ID` next to
+`PETABYTE_IDEMPOTENCY_KEY`, so an algorithm's own logs join the same trace. Events
+land in a bounded ring exposed at `/debug/trace`, with `?task=`, `?trace=`, and
+`?causal=1` (which groups events by `TraceID` and surfaces the parent lineage).
+Off by default behind `PETABYTE_TRACE`: one atomic load per would-be emit, and the
+attrs map is built only when tracing is on. Each process exposes its own ring;
+they are joined after the fact by the shared, coordination-free `TraceID` — the
+deliberate trade of a vendor's automatic cross-service join for zero dependencies
+and zero wire changes, consistent with the rest of the platform's
+identity-derived design. It pairs with [3.4](#34-runtime-concurrency-diagnostics):
+`diag` says an invariant broke, `trace` says which causal chain produced the work
+that broke it.
 
 ---
 

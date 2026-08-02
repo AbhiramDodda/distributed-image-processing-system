@@ -16,6 +16,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/config"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/worker"
 )
 
@@ -27,6 +28,10 @@ func main() {
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Opt-in causal event tracing (worker_recv, staged). Off unless PETABYTE_TRACE
+	// is truthy; served at /debug/trace.
+	trace.EnableFromEnv(log)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {

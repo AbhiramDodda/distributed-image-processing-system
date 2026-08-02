@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
 
 type Scheduler struct {
@@ -182,7 +184,35 @@ func (s *Scheduler) assignLocked(t *Task, workerID string) *TaskAssignment {
 	t.WorkerID = workerID
 	t.AssignedAt = &now
 	s.grantLocked(t)
+	if trace.Enabled() {
+		s.traceEmit(trace.KindAssigned, t, workerID, "", map[string]string{
+			"range": rangeStr(t), "bound": strconv.FormatInt(t.Granted, 10),
+		})
+	}
 	return s.assignmentFor(t)
+}
+
+// traceEmit records a lifecycle event for t (see internal/trace). The TraceID is
+// derived from t's canonical (job, shard, range) identity, so a worker computes
+// the same id for the same work without any wire propagation. Call sites guard
+// with trace.Enabled() so the attrs map is built only when tracing is on.
+func (s *Scheduler) traceEmit(kind string, t *Task, workerID, parent string, attrs map[string]string) {
+	trace.Emit(trace.Event{
+		Kind: kind,
+		TraceID: trace.TraceID(t.JobID, t.Shard, t.RangeStart, t.RangeEnd),
+		TaskID: t.ID,
+		JobID: t.JobID,
+		Shard: t.Shard,
+		Generation: t.Generation,
+		WorkerID: workerID,
+		Parent: parent,
+		Attrs: attrs,
+	})
+}
+
+// rangeStr renders a task's owned half-open range for a trace attribute.
+func rangeStr(t *Task) string {
+	return "[" + strconv.FormatInt(t.RangeStart, 10) + "," + strconv.FormatInt(t.RangeEnd, 10) + ")"
 }
 
 // resetLeaseLocked returns a task's lease to the start of its owned range, so a
@@ -353,9 +383,17 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 			s.resetLeaseLocked(t)
 			s.pendingQ = append(s.pendingQ, t.ID)
 			s.log.Warn("task queued for retry", "task_id", taskID, "retry", t.Retries)
+			if trace.Enabled() {
+				s.traceEmit(trace.KindRetry, t, req.WorkerID, "", map[string]string{
+					"retry": strconv.Itoa(t.Retries), "error": t.Error,
+				})
+			}
 		} else {
 			t.Status = TaskFailed
 			s.updateJob(t.JobID)
+			if trace.Enabled() {
+				s.traceEmit(trace.KindFailed, t, req.WorkerID, "", map[string]string{"error": t.Error})
+			}
 		}
 		s.persistLocked()
 		return nil
@@ -363,6 +401,9 @@ func (s *Scheduler) ReportResult(ctx context.Context, taskID string, req ResultR
 
 	t.Status = TaskDone
 	s.updateJob(t.JobID)
+	if trace.Enabled() {
+		s.traceEmit(trace.KindCommitted, t, req.WorkerID, "", map[string]string{"output_key": finalKey})
+	}
 	s.persistLocked()
 	return nil
 }
@@ -410,6 +451,13 @@ func (s *Scheduler) RenewLease(taskID string, req RenewLeaseRequest) (LeaseRenew
 	// Grant the next chunk: the bound the worker may now reach before renewing.
 	s.grantLocked(t)
 	s.persistLocked()
+	if trace.Enabled() {
+		s.traceEmit(trace.KindGranted, t, req.WorkerID, "", map[string]string{
+			"bound": strconv.FormatInt(t.Granted, 10),
+			"frontier": strconv.FormatInt(t.Frontier, 10),
+			"stolen": strconv.FormatBool(req.Generation < t.Generation),
+		})
+	}
 
 	return LeaseRenewal{
 		Generation: t.Generation,
@@ -480,6 +528,14 @@ func (s *Scheduler) stealLocked() *Task {
 	s.log.Info("stole task tail",
 		"shard", victim.Shard, "victim", victim.ID, "stolen", stolen.ID,
 		"split", split, "stolen_range", fmt.Sprintf("[%d,%d)", stolen.RangeStart, stolen.RangeEnd))
+	if trace.Enabled() {
+		// The child descends causally from the victim; record the victim's newly
+		// bumped generation so the fenced lineage is visible in the trace.
+		s.traceEmit(trace.KindStolen, stolen, "", victim.ID, map[string]string{
+			"range": rangeStr(stolen),
+			"victim_generation": strconv.FormatInt(victim.Generation, 10),
+		})
+	}
 	return stolen
 }
 

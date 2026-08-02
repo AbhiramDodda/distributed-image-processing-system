@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
 
 type API struct {
@@ -15,6 +17,9 @@ func NewAPI(w *Worker) *API { return &API{w: w} }
 
 func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", a.handleHealth)
+	// Worker-side slice of the causal trace (worker_recv, staged), joined to the
+	// coordinator's events by the identity-derived TraceID. See internal/trace.
+	mux.HandleFunc("/debug/trace", trace.Handler())
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -22,6 +22,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/sandbox"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
 
 func main() {
@@ -81,6 +82,7 @@ func main() {
 		Dataset: assignment.Dataset,
 		Image: image,
 		Limits: limitsFromEnv(),
+		TraceID: trace.TraceID(assignment.JobID, assignment.Shard, assignment.RangeStart, assignment.RangeEnd),
 		Env: map[string]string{
 			"PETABYTE_SHARD": assignment.Shard,
 			"PETABYTE_DATASET": assignment.Dataset,

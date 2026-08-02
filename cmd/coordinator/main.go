@@ -26,6 +26,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/rpc/coordinatorpb"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
 
 func main() {
@@ -45,6 +46,10 @@ func main() {
 	if diag.EnableFromEnv(log) {
 		log.Info("concurrency diagnostics active", "endpoint", "/debug/diag")
 	}
+
+	// Opt-in causal event tracing of the task lifecycle. Off unless PETABYTE_TRACE
+	// is truthy; served at /debug/trace.
+	trace.EnableFromEnv(log)
 
 	coord := coordinator.New(cfg, log)
 

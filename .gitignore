@@ -33,6 +33,9 @@ coordinator-wal/
 PROGRESS.md
 summary.md
 
+# Blog drafts (not part of the shipped repo)
+blog/
+
 # Test coverage
 coverage.out
 coverage.html

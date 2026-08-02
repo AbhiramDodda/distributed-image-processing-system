@@ -12,6 +12,7 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/cluster"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/diag"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
 
 type API struct {
@@ -38,6 +39,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	// warnings, and (with ?stacks=1) a full goroutine dump. Always registered;
 	// it reports enabled=false and is otherwise inert until PETABYTE_DIAG is set.
 	mux.HandleFunc("/debug/diag", diag.Handler())
+	// Causal event trace: a task's lifecycle across assign/steal/renew/commit,
+	// joined by an identity-derived TraceID. Always registered; reports
+	// enabled=false until PETABYTE_TRACE is set. See internal/trace.
+	mux.HandleFunc("/debug/trace", trace.Handler())
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {

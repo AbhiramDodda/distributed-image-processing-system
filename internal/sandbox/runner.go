@@ -36,11 +36,20 @@ type RunnerSpec struct {
 	// exactly-once despite retries and failover. Exposed to the container as
 	// IdempotencyKeyEnv.
 	IdempotencyKey string
+	// TraceID is the identity-derived causal trace handle for this unit of work
+	// (trace.TraceID). Exposed to the container as TraceIDEnv so the algorithm's
+	// own logs can be correlated with the platform's coordinator/worker trace for
+	// the same (job, shard, range).
+	TraceID string
 }
 
 // IdempotencyKeyEnv is the environment variable under which the task's
 // deterministic idempotency key is exposed to untrusted algorithm code.
 const IdempotencyKeyEnv = "PETABYTE_IDEMPOTENCY_KEY"
+
+// TraceIDEnv is the environment variable under which the task's causal trace id
+// is exposed to untrusted algorithm code.
+const TraceIDEnv = "PETABYTE_TRACE_ID"
 
 // RunResult is what the runner reports back to the coordinator.
 type RunResult struct {
@@ -81,10 +90,15 @@ func (r Runner) Execute(ctx context.Context, spec RunnerSpec, baseDir string) (*
 	// caller's map. The algorithm forwards it to any downstream it writes so those
 	// side effects dedupe across re-execution (see RunnerSpec.IdempotencyKey).
 	env := spec.Env
-	if spec.IdempotencyKey != "" {
-		env = make(map[string]string, len(spec.Env)+1)
+	if spec.IdempotencyKey != "" || spec.TraceID != "" {
+		env = make(map[string]string, len(spec.Env)+2)
 		maps.Copy(env, spec.Env)
-		env[IdempotencyKeyEnv] = spec.IdempotencyKey
+		if spec.IdempotencyKey != "" {
+			env[IdempotencyKeyEnv] = spec.IdempotencyKey
+		}
+		if spec.TraceID != "" {
+			env[TraceIDEnv] = spec.TraceID
+		}
 	}
 
 	exec, execErr := r.Runtime.Run(ctx, ExecutionSpec{

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,7 +19,27 @@ import (
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/formats"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/scheduler"
 	"github.com/AbhiramDodda/distributed-image-processing-system/internal/storage"
+	"github.com/AbhiramDodda/distributed-image-processing-system/internal/trace"
 )
+
+// traceEmit records a worker-side lifecycle event for an assignment. The TraceID
+// is derived from the assignment's (job, shard, range) identity -- the same
+// derivation the coordinator uses -- so a task's coordinator-side and
+// worker-side events share a TraceID with no id passed over the wire. Guard
+// call sites with trace.Enabled() so the attrs map is built only when tracing is
+// on.
+func (w *Worker) traceEmit(kind string, a scheduler.TaskAssignment, attrs map[string]string) {
+	trace.Emit(trace.Event{
+		Kind: kind,
+		TraceID: trace.TraceID(a.JobID, a.Shard, a.RangeStart, a.RangeEnd),
+		TaskID: a.TaskID,
+		JobID: a.JobID,
+		Shard: a.Shard,
+		Generation: a.Generation,
+		WorkerID: w.id,
+		Attrs: attrs,
+	})
+}
 
 // objectStore is the slice of storage.Client the worker's algorithm loop needs:
 // list a shard's keys, read its objects, and stage the result. Narrowed to an
@@ -152,6 +173,9 @@ func (w *Worker) executeTask(ctx context.Context, a scheduler.TaskAssignment) {
 	defer func() { <-w.sem }()
 
 	w.log.Info("task started", "task_id", a.TaskID, "shard", a.Shard, "dataset", a.Dataset)
+	if trace.Enabled() {
+		w.traceEmit(trace.KindWorkerRecv, a, map[string]string{"bound": strconv.FormatInt(a.Bound, 10)})
+	}
 	postJSON(w.coordinator+"/v1/tasks/"+a.TaskID+"/start", scheduler.StartTaskRequest{WorkerID: w.id})
 
 	start := time.Now()
@@ -180,6 +204,9 @@ func (w *Worker) executeTask(ctx context.Context, a scheduler.TaskAssignment) {
 // coordinator. Used by K8s Job pods that receive their assignment via env var.
 func (w *Worker) RunTask(ctx context.Context, a scheduler.TaskAssignment) error {
 	w.log.Info("single-task mode", "task_id", a.TaskID, "shard", a.Shard, "dataset", a.Dataset)
+	if trace.Enabled() {
+		w.traceEmit(trace.KindWorkerRecv, a, map[string]string{"bound": strconv.FormatInt(a.Bound, 10)})
+	}
 	postJSON(w.coordinator+"/v1/tasks/"+a.TaskID+"/start", scheduler.StartTaskRequest{WorkerID: w.id})
 	start := time.Now()
 	processed, bytesRead, outputKey, execErr := w.runAlgorithm(ctx, a)
@@ -291,6 +318,11 @@ func (w *Worker) runAlgorithm(ctx context.Context, a scheduler.TaskAssignment) (
 	}
 	if err := w.store.Put(ctx, stagingKey, bytes.NewReader(body.Bytes()), "application/vnd.apache.parquet"); err != nil {
 		return 0, 0, "", fmt.Errorf("stage result %s: %w", stagingKey, err)
+	}
+	if trace.Enabled() {
+		w.traceEmit(trace.KindStaged, a, map[string]string{
+			"staging_key": stagingKey, "images": strconv.FormatInt(processed, 10),
+		})
 	}
 	return processed, totalBytes, stagingKey, nil
 }
