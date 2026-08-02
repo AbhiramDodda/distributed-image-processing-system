@@ -639,12 +639,18 @@ formats.
   - Cons: forces every consumer to convert; loses framework-native performance
     (e.g. `tf.data` wants TFRecord, Spark/Athena want Parquet).
 
-**Decision.** Emit **TFRecord** (masked CRC32C framing for `tf.data`),
-**WebDataset** tar shards, **Apache Arrow** columnar batches, and **Parquet**
-result files. Each targets a real consumer and is produced with correct framing
-so it interoperates without a conversion step. The cost is more encoders to
-maintain and test; justified because "queryable directly by Athena/Spark/DuckDB"
-and "streams into `tf.data`" are concrete requirements, not hypotheticals.
+**Decision.** The committed result path emits **Parquet** (via `pqarrow`): each
+task stages a single-row-group result object the coordinator promotes into the
+`results/` tree, so completed jobs are queryable by Athena/Spark/DuckDB with no
+conversion step. The package additionally provides **TFRecord** (masked CRC32C
+framing for `tf.data`), **WebDataset** tar shards, and **Apache Arrow** columnar
+batches with IPC framing — each targets a real consumer and is produced with
+correct framing so it interoperates without a conversion step. The cost is more
+encoders to maintain and test; justified because "queryable directly by
+Athena/Spark/DuckDB" is a concrete requirement the live path now meets, and the
+others are ready to wire onto the same result path as their consumers appear.
+Being precise: only Parquet result output is currently on a runtime path; the
+other three are tested but not yet wired to a producer.
 
 ---
 
