@@ -476,6 +476,20 @@ goroutine dump. Off by default: one atomic load per lock op, nothing for asserts
 The explicit scope boundary — it catches *logical* races and *deadlocks*, not
 *data* races — is stated so it is never mistaken for a substitute for `-race`.
 
+`diag` is the passive half; the **chaos harness** is the active half. A
+seeded, `-race` scheduler test stands up a pool of worker goroutines that hammer
+one shard with the full operation mix (poll, lease-renew with progress, report,
+idle-poll that triggers a steal) while injecting faults — transient failures that
+force retries, duplicate and late reports, and workers that die mid-task without
+reporting — then drains deterministically and asserts the properties that must
+hold *however* the operations interleaved: zero `diag` violations, ranges that
+tile the shard exactly (no gap, no overlap), every task terminal, and exactly one
+committed object per task. It is the counterpart to waiting for a bad
+interleaving — it *provokes* one, with tracing ([3.5](#35-causal-event-tracing-across-the-boundary))
+on so a failure prints the causal chain that produced the offending work, and a
+coverage guard that fails if a run never actually stole, so a green result can
+never be a false comfort.
+
 ### 3.5 Causal event tracing across the boundary
 
 **Context.** `diag` catches a bug the moment it fires; it does not explain *how a

@@ -413,9 +413,6 @@ not a claim of production readiness.
 
 - **Close the exactly-once gap.** Fold the result copy and the done-mark into one replicated
   Raft log entry so a coordinator crash can't re-run a committed task.
-- **Deeper observability.** Causal event tracing across the coordinator/worker boundary, and a
-  `-race` stress/chaos harness that actively provokes races and deadlocks rather than waiting
-  for them to appear.
 
 ## Prerequisites
 
@@ -872,4 +869,5 @@ The tiering engine transitions objects based on age (configurable thresholds in 
 | + | Backpressure & admission control (`internal/admission`, load-shedding + weighted shares) | Complete |
 | + | CLIP image similarity search (`internal/vsearch`, exact cosine k-NN + `/v1/similar`) | Complete (live demo: `scripts/clip-search-demo.sh`) |
 | + | End-to-end CLIP/LAION similarity-search demo | Planned |
-| + | Causal event tracing + `-race` chaos harness | Planned |
+| + | Causal event tracing across the coordinator/worker boundary (`internal/trace`, `/debug/trace`) | Complete |
+| + | `-race` chaos harness provoking concurrent-fault interleavings (`scheduler` chaos test) | Complete |
